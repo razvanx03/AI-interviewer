@@ -1,0 +1,84 @@
+# ==========================================
+# Root .gitignore - AI Job Interviewer
+# ==========================================
+
+# Node & Frontend (app/)
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.tsbuildinfo
+.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Python & Backend (api/ & llm/)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+eggs/
+.eggs/
+parts/
+var/
+sdist/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment Variables & Secrets
+.env
+.env.local
+.env.*.local
+*.env
+
+# Local Storage / Uploads / Model weights
+uploads/
+*.pdf
+*.docx
+*.doc
+!docs/**/*.md
+
+# Logs & Diagnostics
+logs/
+*.log
+
+# Operating System
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# IDEs and Editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
