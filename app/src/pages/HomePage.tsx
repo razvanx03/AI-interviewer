@@ -1,119 +1,74 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Shield, Cpu } from 'lucide-react';
-import { Header } from '@/components/layout/Header';
+import { useNavigate, useOutletContext } from 'react-router-dom';
+import { Sparkles, PanelLeftOpen } from 'lucide-react';
 import { CreateInterviewForm } from '@/components/forms/CreateInterviewForm';
-import { PreviousInterviewsList } from '@/components/history/PreviousInterviewsList';
-import { CreateInterviewInput, InterviewSession } from '@/types';
-import { getStoredInterviews, createNewInterviewSession } from '@/lib/storage';
+import { Button } from '@/components/ui/button';
+import { useLanguage } from '@/hooks/use-language';
+import { useInterviews } from '@/hooks/use-interviews';
+import { AppLayoutContextType } from '@/components/layout/AppLayout';
+import { CreateInterviewInput } from '@/types';
+import { apiCreateInterview } from '@/lib/api';
 
-interface HomePageProps {
-  onNavigateToInterview: (id: string) => void;
-}
-
-export const HomePage: React.FC<HomePageProps> = ({ onNavigateToInterview }) => {
-  const [interviews, setInterviews] = useState<InterviewSession[]>([]);
+export const HomePage: React.FC = () => {
   const [isCreating, setIsCreating] = useState(false);
+  const { addInterview } = useInterviews();
+  const { toggleSidebar } = useOutletContext<AppLayoutContextType>();
+  const navigate = useNavigate();
+  const { t } = useLanguage();
 
   useEffect(() => {
-    setInterviews(getStoredInterviews());
-  }, []);
+    document.title = `${t.brand.name} - ${t.brand.subtitle}`;
+  }, [t]);
 
-  const handleCreateInterview = (input: CreateInterviewInput) => {
+  const handleCreateInterview = async (input: CreateInterviewInput) => {
     setIsCreating(true);
     try {
-      const newSession = createNewInterviewSession(input);
-      // Immediately open the created interview room
-      onNavigateToInterview(newSession.id);
+      const session = await apiCreateInterview(input);
+      addInterview(session);
+      navigate(`/interview/${session.id}`);
     } catch (err) {
-      console.error('Failed to create interview session:', err);
+      console.error('Failed to create interview:', err);
+    } finally {
       setIsCreating(false);
     }
   };
 
-  const handleClearHistory = () => {
-    if (confirm('Are you sure you want to clear all interview history from this browser?')) {
-      localStorage.removeItem('ai_interviewer_sessions_v1');
-      setInterviews([]);
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <Header />
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Top Header */}
+      <header className="flex h-14 sm:h-16 shrink-0 items-center justify-between border-b border-border bg-card/60 px-3 sm:px-6 gap-2 backdrop-blur">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+          {/* Mobile Menu / Sidebar Trigger */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleSidebar}
+            className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground md:hidden"
+            title="Expand sidebar"
+          >
+            <PanelLeftOpen className="h-4.5 w-4.5" />
+          </Button>
 
-      <main className="flex-1 container mx-auto max-w-6xl px-4 py-8 sm:px-8 space-y-10">
-        {/* Hero Section */}
-        <div className="text-center max-w-2xl mx-auto space-y-3">
-          <div className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-medium text-primary">
-            <Sparkles className="h-3.5 w-3.5" />
-            AI-Driven Technical Screening
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-            Practice & Run Specialized Job Interviews
-          </h1>
-          <p className="text-sm sm:text-base text-muted-foreground leading-relaxed">
-            Upload your resume, specify the role and requirements, and let our specialized AI
-            conduct a full-context technical interview.
-          </p>
-        </div>
-
-        {/* Main Grid: Form and History */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Create Interview Form */}
-          <div className="lg:col-span-7">
-            <CreateInterviewForm onSubmit={handleCreateInterview} isLoading={isCreating} />
-          </div>
-
-          {/* Side Column: Previous Interviews & Platform Benefits */}
-          <div className="lg:col-span-5 space-y-6">
-            <PreviousInterviewsList
-              interviews={interviews}
-              onOpenInterview={onNavigateToInterview}
-              onClearHistory={handleClearHistory}
-            />
-
-            {/* Platform Feature Badges */}
-            <div className="rounded-xl border border-border/70 bg-card/40 p-5 space-y-4 text-xs">
-              <h3 className="font-semibold text-foreground text-sm flex items-center gap-2">
-                <Cpu className="h-4 w-4 text-primary" />
-                How It Works
-              </h3>
-              <div className="space-y-2.5 text-muted-foreground">
-                <div className="flex gap-2.5">
-                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-[10px]">
-                    1
-                  </div>
-                  <p>
-                    <strong className="text-foreground">Job Context:</strong> We analyze the target
-                    role and key competencies.
-                  </p>
-                </div>
-                <div className="flex gap-2.5">
-                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-[10px]">
-                    2
-                  </div>
-                  <p>
-                    <strong className="text-foreground">Resume Parsing:</strong> We match questions
-                    directly to your career history.
-                  </p>
-                </div>
-                <div className="flex gap-2.5">
-                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-[10px]">
-                    3
-                  </div>
-                  <p>
-                    <strong className="text-foreground">Adaptive AI:</strong> Follow-up questions
-                    dynamically probe depth and edge cases.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 pt-2 border-t border-border/50 text-[11px] text-muted-foreground">
-                <Shield className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                <span>100% Client-side local prototype. No account required.</span>
-              </div>
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="hidden sm:flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Sparkles className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="truncate text-xs sm:text-base font-bold text-foreground">
+                {t.header.createNew}
+              </h1>
+              <p className="hidden text-xs text-muted-foreground sm:block">
+                {t.header.configureSubtitle}
+              </p>
             </div>
           </div>
+        </div>
+      </header>
+
+      {/* Main Content Form */}
+      <main className="flex-1 overflow-y-auto p-3 sm:p-6 flex justify-center items-start sm:items-center">
+        <div className="w-full max-w-2xl py-2 sm:py-0">
+          <CreateInterviewForm onSubmit={handleCreateInterview} isLoading={isCreating} />
         </div>
       </main>
     </div>

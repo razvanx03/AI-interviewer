@@ -51,8 +51,11 @@ venv.bak/
 .env.*.local
 *.env
 
-# Local Storage / Uploads / Model weights
+# Local Storage / Uploads / Model weights & Databases
 uploads/
+*.db
+*.sqlite
+*.sqlite3
 *.pdf
 *.docx
 *.doc

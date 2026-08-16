@@ -9,7 +9,7 @@ export type ThemeProviderProps = {
 
 export function ThemeProvider({
   children,
-  defaultTheme = 'dark',
+  defaultTheme = 'system',
   storageKey = 'ai-interviewer-ui-theme',
   ...props
 }: ThemeProviderProps) {

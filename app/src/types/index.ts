@@ -6,8 +6,10 @@ export interface ChatMessage {
   id: string;
   role: 'assistant' | 'user' | 'system';
   content: string;
-  timestamp: string;
+  timestamp?: string;
+  createdAt?: string;
   questionNumber?: number;
+  feedback?: string;
 }
 
 export interface InterviewSession {

@@ -1,47 +1,88 @@
 # AI-Powered Job Interviewer
 
-An autonomous technical job interviewer web application that tailors questions based on candidate resumes and job role requirements.
+An autonomous, privacy-first technical job interviewer platform that conducts live, adaptive screening interviews tailored to specific job descriptions and candidate resumes.
 
-![AI Interviewer Architecture](https://img.shields.io/badge/Frontend-React%20%2B%20shadcn%2Fui-blue)
-![API Backend](https://img.shields.io/badge/Backend-FastAPI%20%2B%20Pydantic-green)
-![Local AI](https://img.shields.io/badge/AI-Ollama%20%2F%20Local%20LLM-purple)
+[![Frontend](https://img.shields.io/badge/Frontend-React%2019%20%2B%20Vite%20%2B%20shadcn%2Fui-blue)](app/)
+[![Backend](https://img.shields.io/badge/Backend-FastAPI%20%2B%20SQLAlchemy%202.0-emerald)](api/)
+[![Database](https://img.shields.io/badge/Database-PostgreSQL%2016%20%2B%20pgvector-indigo)](docker-compose.yml)
+[![Container](https://img.shields.io/badge/Docker-3--Container%20Orchestration-cyan)](docs/docker.md)
+[![Animations](https://img.shields.io/badge/Animations-Thinking%20Orbs-violet)](https://github.com/Jakubantalik/thinking-orbs)
 
 ---
 
-## Architecture Overview
+## 🏛️ System Architecture
 
 ```
 AI-interviewer/
-├── app/                      # React 19 + TypeScript + Vite + shadcn/ui
-├── api/                      # FastAPI Python REST & WebSocket backend
-├── llm/                      # AI provider layer (Mock, Ollama, Prompts)
+├── app/                      # React 19 + TypeScript + Vite + Tailwind CSS + shadcn/ui
+├── api/                      # FastAPI Python backend (SQLAlchemy 2.0 Async + asyncpg)
+├── llm/                      # Standalone LLM Provider layer (Mock, Ollama, Prompt Engineering)
 ├── docs/                     # Mirrored technical documentation
-│   ├── ARCHITECTURE.md
-│   ├── app/                  # Mirrored frontend component & state docs
-│   ├── api/                  # Mirrored backend endpoints & service docs
-│   └── llm/                  # Mirrored AI engine & RAG docs
-├── AGENTS.md                 # Developer & AI assistant guidelines
+│   ├── ARCHITECTURE.md       # Full system design and data-flow map
+│   ├── docker.md             # Docker multi-container guide
+│   ├── app/                  # Frontend pages, components, and state docs
+│   ├── api/                  # Backend endpoints, schemas, and service docs
+│   └── llm/                  # AI engine, prompts, and vector integration docs
+├── docker-compose.yml        # 3-Service environment (app, api, postgres)
+├── AGENTS.md                 # Mandatory instructions for AI agents and developers
 └── README.md
 ```
 
-For in-depth architecture and development details, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+For comprehensive technical specifications, refer to [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ---
 
-## Features
+## ✨ Key Features
 
-- **Custom Interview Wizard**: Specify target job role, company, seniority level, requirements, and drop a CV file (PDF/DOCX/TXT).
-- **Shareable URL**: Each session receives a unique 8-character token (e.g. `/interview/k8d9f1a2`).
-- **Interactive AI Chat Room**: Live technical screening with dynamic evaluation, follow-up questions, and performance summary.
-- **LocalStorage History**: Browser stores previous interview transcripts and links for quick reference without requiring user accounts.
-- **Privacy & Local AI Ready**: Decoupled architecture designed for local Ollama models (Llama 3, Qwen 2.5, Gemma) and PostgreSQL + pgvector.
+- **ChatGPT/Claude Styled Interface**: Sleek dark/light theme, collapsible navigation rail, search filter, and custom modal dialogs.
+- **Thinking Orbs Animations**: Native 2D canvas visual state indicators (`connecting`, `solving`) powered by [`thinking-orbs`](https://github.com/Jakubantalik/thinking-orbs).
+- **Real-Time Token Streaming**: Server-Sent Events (SSE) streaming pipeline delivering instantaneous AI token rendering.
+- **Persistent PostgreSQL Storage**: Asynchronous session and transcript storage with SQLAlchemy 2.0 and `asyncpg` with cascading cleanups.
+- **Mobile-First Responsive UX**: Mobile drawer with swipe-to-delete gestures, interactive slide arrows, and dynamic header wrapping.
+- **Internationalization (i18n)**: Instant runtime language switching between English (🇬🇧) and Romanian (🇷🇴).
+- **Privacy & Local AI Ready**: Decoupled architecture designed for local Ollama models (Llama 3, Qwen 2.5, DeepSeek) and PostgreSQL + pgvector embeddings.
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
-### 1. Frontend (`app/`)
+### Option 1: Complete 3-Container Docker Setup (Recommended)
 
+Run the entire stack (React frontend, FastAPI backend, and PostgreSQL with pgvector) with a single command:
+
+```bash
+docker compose up -d --build
+```
+
+- 🌐 **Frontend SPA**: [http://localhost:5173](http://localhost:5173)
+- ⚙️ **Backend API & Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- 🗄️ **PostgreSQL Database**: `localhost:5432` (`user: postgres`, `password: postgres`, `db: ai_interviewer`)
+
+To inspect logs:
+```bash
+docker compose logs -f
+```
+
+For full container documentation, see [`docs/docker.md`](docs/docker.md).
+
+---
+
+### Option 2: Local Development
+
+#### 1. Database (PostgreSQL)
+Ensure a PostgreSQL instance is running on `localhost:5432` with database `ai_interviewer`. Configure credentials in `api/.env`:
+```env
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/ai_interviewer
+```
+
+#### 2. Backend (`api/`)
+```bash
+cd api
+python main.py
+```
+*(Automatically bootstraps the local virtual environment and launches on [http://localhost:8000](http://localhost:8000)).*
+
+#### 3. Frontend (`app/`)
 ```bash
 cd app
 npm install
@@ -49,23 +90,12 @@ npm run dev
 ```
 Open [http://localhost:5173](http://localhost:5173) in your browser.
 
-### 2. Backend (`api/`)
-
-```bash
-cd api
-python -m venv venv
-# Windows:
-.\venv\Scripts\activate
-# Linux/macOS:
-source venv/bin/activate
-
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-```
-Interactive API documentation: [http://localhost:8000/docs](http://localhost:8000/docs)
-
 ---
 
-## Developer Guidelines
+## 🛠️ Code Quality & Contribution Rules
 
-Please review [`AGENTS.md`](AGENTS.md) before making contributions. All UI modifications must strictly adhere to **shadcn/ui** components, code must pass ESLint & Prettier checks, and technical documentation in `docs/` must be updated synchronously.
+Before submitting pull requests or completing AI agent tasks:
+- Ensure ESLint passes with **0 errors**: `npm run lint` inside `app/`.
+- Ensure Prettier formatting is compliant: `npm run format:check`.
+- Verify production build compiles cleanly: `npm run build`.
+- Keep technical specifications in `docs/` and Docker configurations in sync as mandated in [`AGENTS.md`](AGENTS.md).

@@ -55,3 +55,22 @@ Whenever you make changes to this codebase:
    - Avoid creating unnecessary layers of indirection, speculative factories, or premature generalizations when a simple, well-typed interface suffices.
 3. **Modularity and Extensibility**:
    - Keep the codebase modular, readable, maintainable, and straightforward to extend without excessive cognitive overhead.
+
+---
+
+## 5. Clean Architecture & Legacy Code Removal (MANDATORY)
+
+1. **Delete Obsolete Implementations Completely**:
+   - Whenever you make a significant change or migrate to a newer architecture (e.g. migrating full localStorage sessions to database persistence, switching from polling to SSE streaming), **always delete the old, deprecated code, functions, fallback mock data stores, and obsolete localStorage keys**.
+   - **Never leave dual persistence mechanisms or dead legacy paths** running alongside new features, as they cause infinite loops, state de-synchronization, and bloated client memory.
+   - Clean up any legacy localStorage keys automatically (e.g. `localStorage.removeItem('ai_interviewer_sessions_v1')`) when the client loads.
+
+---
+
+## 6. Docker Containerization Synchronization (MANDATORY)
+
+1. **Keep Docker Configuration Always In-Sync**:
+   - Whenever dependencies (`api/requirements.txt`, `app/package.json`), environment variables (`.env`, `config.py`), ports, or service architectures change:
+     - **Always update `docker-compose.yml`**, `api/Dockerfile`, `app/Dockerfile`, and `.dockerignore` files.
+     - **Always verify that `docker compose up --build` continues to work cleanly** and launches all 3 services (`frontend`, `backend`, `db`).
+   - Document any new containerized services, volume mounts, or networking changes in `docs/docker.md`.
