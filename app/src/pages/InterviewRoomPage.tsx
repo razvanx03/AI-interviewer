@@ -1,101 +1,249 @@
 import React, { useState, useEffect } from 'react';
-import { Bot, AlertCircle, ArrowLeft } from 'lucide-react';
-import { InterviewHeader } from '@/components/interview/InterviewHeader';
-import { InterviewSidebar } from '@/components/interview/InterviewSidebar';
+import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
+import { Share2, Check, StopCircle, Bot, Loader2, PanelLeftOpen } from 'lucide-react';
+import { ThinkingOrb } from 'thinking-orbs';
 import { ChatInterface } from '@/components/interview/ChatInterface';
+import { NotFoundPage } from '@/pages/NotFoundPage';
+import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { useLanguage } from '@/hooks/use-language';
+import { useInterviews } from '@/hooks/use-interviews';
+import { AppLayoutContextType } from '@/components/layout/AppLayout';
 import { InterviewSession } from '@/types';
-import { getInterviewById, saveInterview } from '@/lib/storage';
+import { apiGetInterview, apiCompleteInterview } from '@/lib/api';
 
-interface InterviewRoomPageProps {
-  interviewId: string;
-  onNavigateHome: () => void;
-}
+export const InterviewRoomPage: React.FC = () => {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { toggleSidebar } = useOutletContext<AppLayoutContextType>();
+  const { updateInterview } = useInterviews();
+  const { t } = useLanguage();
 
-export const InterviewRoomPage: React.FC<InterviewRoomPageProps> = ({
-  interviewId,
-  onNavigateHome,
-}) => {
-  const [session, setSession] = useState<InterviewSession | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [activeSession, setActiveSession] = useState<InterviewSession | null>(null);
+  const [isNotFound, setIsNotFound] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const [showFinishDialog, setShowFinishDialog] = useState(false);
+  const [isEnding, setIsEnding] = useState(false);
 
   useEffect(() => {
-    const loaded = getInterviewById(interviewId);
-    setSession(loaded);
-    setLoading(false);
-  }, [interviewId]);
+    if (!id) {
+      setIsNotFound(true);
+      setIsLoading(false);
+      return;
+    }
 
-  const handleSessionUpdate = (updated: InterviewSession) => {
-    setSession(updated);
+    let isMounted = true;
+    setIsLoading(true);
+    setActiveSession(null);
+
+    const loadSession = async () => {
+      try {
+        const [fresh] = await Promise.all([
+          apiGetInterview(id),
+          new Promise((resolve) => setTimeout(resolve, 500)),
+        ]);
+
+        if (!isMounted) return;
+
+        if (fresh) {
+          setActiveSession(fresh);
+          setIsNotFound(false);
+        } else {
+          setIsNotFound(true);
+        }
+      } catch (err) {
+        if (!isMounted) return;
+        console.error('Failed to fetch interview session from DB:', err);
+        setIsNotFound(true);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    loadSession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [id]);
+
+  // Dynamic Browser Title (ChatGPT style: conversation title only)
+  useEffect(() => {
+    if (activeSession) {
+      document.title = activeSession.jobTitle;
+    }
+  }, [activeSession]);
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(window.location.href).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   };
 
-  const handleEndInterview = () => {
-    if (!session) return;
-    if (confirm('Are you sure you want to end this interview session?')) {
-      const updated: InterviewSession = {
-        ...session,
-        status: 'completed',
-        updatedAt: new Date().toISOString(),
-      };
-      setSession(updated);
-      saveInterview(updated);
+  const handleEndInterview = async () => {
+    if (!activeSession) return;
+    setIsEnding(true);
+    try {
+      const updated = await apiCompleteInterview(activeSession.id);
+      if (updated) {
+        setActiveSession(updated);
+        updateInterview(updated);
+      } else {
+        const fallback: InterviewSession = {
+          ...activeSession,
+          status: 'completed',
+          updatedAt: new Date().toISOString(),
+        };
+        setActiveSession(fallback);
+        updateInterview(fallback);
+      }
+    } finally {
+      setIsEnding(false);
+      setShowFinishDialog(false);
     }
   };
 
-  if (loading) {
+  const handleSessionUpdate = (updated: InterviewSession) => {
+    setActiveSession(updated);
+    updateInterview(updated);
+  };
+
+  if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="flex items-center gap-3 text-sm text-muted-foreground">
-          <Bot className="h-6 w-6 animate-pulse text-primary" />
-          <span>Loading interview environment...</span>
-        </div>
+      <div className="flex h-full items-center justify-center bg-background">
+        <ThinkingOrb state="connecting" size={64} />
       </div>
     );
   }
 
-  if (!session) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4 text-center">
-        <div className="max-w-md space-y-4">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
-            <AlertCircle className="h-6 w-6" />
-          </div>
-          <h2 className="text-xl font-bold text-foreground">Interview Session Not Found</h2>
-          <p className="text-sm text-muted-foreground">
-            No active session was found matching ID{' '}
-            <span className="font-mono font-medium text-foreground">{interviewId}</span> in this
-            browser.
-          </p>
-          <Button onClick={onNavigateHome} className="gap-2">
-            <ArrowLeft className="h-4 w-4" />
-            Return to Dashboard
-          </Button>
-        </div>
-      </div>
-    );
+  if (isNotFound || (!activeSession && !isLoading)) {
+    return <NotFoundPage onNewInterview={() => navigate('/')} />;
   }
+
+  if (!activeSession) return null;
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <InterviewHeader
-        session={session}
-        onBackToHome={onNavigateHome}
-        onEndInterview={handleEndInterview}
-      />
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Top Header */}
+      <header className="flex h-14 sm:h-16 shrink-0 items-center justify-between border-b border-border bg-card/60 px-3 sm:px-6 gap-2 backdrop-blur">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+          {/* Mobile Menu / Sidebar Trigger */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleSidebar}
+            className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground md:hidden"
+            title="Expand sidebar"
+          >
+            <PanelLeftOpen className="h-4.5 w-4.5" />
+          </Button>
 
-      <main className="flex-1 container mx-auto max-w-6xl px-4 py-6 sm:px-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-7rem)] min-h-[600px]">
-          {/* Main Chat Area */}
-          <div className="lg:col-span-8 h-full">
-            <ChatInterface session={session} onSessionUpdate={handleSessionUpdate} />
+          {/* Active Interview Details */}
+          <div className="hidden sm:flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-xs">
+            <Bot className="h-5 w-5" />
           </div>
 
-          {/* Right Sidebar: Candidate & Job Profile */}
-          <div className="hidden lg:block lg:col-span-4 h-full overflow-y-auto pr-1">
-            <InterviewSidebar session={session} />
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-xs sm:text-base font-bold text-foreground leading-tight">
+              {activeSession.jobTitle}
+            </h1>
+            <p className="truncate text-[11px] sm:text-xs text-muted-foreground flex items-center gap-1 sm:gap-1.5 mt-0.5">
+              <span className="truncate">
+                <span className="hidden sm:inline">{t.header.candidate}: </span>
+                <span className="font-medium text-foreground">{activeSession.candidateName}</span>
+              </span>
+              {activeSession.companyName && (
+                <>
+                  <span className="text-muted-foreground/50 shrink-0">•</span>
+                  <span className="truncate">
+                    <span className="hidden sm:inline">{t.header.company}: </span>
+                    <span className="font-medium text-foreground">{activeSession.companyName}</span>
+                  </span>
+                </>
+              )}
+            </p>
           </div>
         </div>
+
+        {/* Right Actions */}
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          {/* Share Link */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCopyLink}
+            className="h-8 px-2 sm:px-3 gap-1.5 text-xs font-medium"
+            title={t.header.share}
+          >
+            {copied ? (
+              <>
+                <Check className="h-3.5 w-3.5 text-emerald-500" />
+                <span className="hidden sm:inline">{t.header.copied}</span>
+              </>
+            ) : (
+              <>
+                <Share2 className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="hidden sm:inline">{t.header.share}</span>
+              </>
+            )}
+          </Button>
+
+          {/* Finish Button */}
+          {activeSession.status !== 'completed' && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowFinishDialog(true)}
+              disabled={isEnding}
+              className="h-8 px-2 sm:px-3 gap-1.5 text-xs text-destructive hover:bg-destructive/10 cursor-pointer"
+              title={t.header.finish}
+            >
+              {isEnding ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <StopCircle className="h-3.5 w-3.5" />
+              )}
+              <span className="hidden sm:inline">{t.header.finish}</span>
+            </Button>
+          )}
+
+          {/* Status Badge: Orange for Live, Green for Completed */}
+          {activeSession.status === 'completed' ? (
+            <Badge
+              variant="outline"
+              className="border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] sm:text-xs font-medium px-2 py-0.5 h-7"
+            >
+              {t.header.completed}
+            </Badge>
+          ) : (
+            <Badge
+              variant="outline"
+              className="border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[10px] sm:text-xs font-medium px-2 py-0.5 h-7"
+            >
+              {t.header.live}
+            </Badge>
+          )}
+        </div>
+      </header>
+
+      {/* Main Chat Interface */}
+      <main className="flex-1 overflow-hidden">
+        <ChatInterface session={activeSession} onSessionUpdate={handleSessionUpdate} />
       </main>
+
+      {/* Conclude Interview Confirmation Modal */}
+      <DeleteConfirmDialog
+        open={showFinishDialog}
+        onOpenChange={setShowFinishDialog}
+        onConfirm={handleEndInterview}
+        title={t.header.finishConfirmTitle}
+        description={t.header.finishConfirmDesc}
+        confirmText={t.header.finishConfirmBtn}
+        confirmIcon="stop"
+      />
     </div>
   );
 };

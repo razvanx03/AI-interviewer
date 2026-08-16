@@ -6,8 +6,10 @@
   - Response: `InterviewResponse` (HTTP 201)
 - `GET /api/v1/interviews/{interview_id}`: Retrieves session state.
   - Response: `InterviewResponse` (HTTP 200 or 404)
-- `GET /api/v1/interviews/{interview_id}/messages`: Retrieves chat transcript.
-  - Response: `List[ChatMessage]` (HTTP 200 or 404)
+- `POST /api/v1/interviews/{interview_id}/complete`: Marks an active interview as completed in PostgreSQL and appends a closing summary message.
+  - Response: `InterviewResponse` (HTTP 200)
+- `DELETE /api/v1/interviews/{interview_id}`: Deletes the interview and all associated messages.
+  - Response: HTTP 204 (No Content)
 
 ## 2. `chat.py`
 - `POST /api/v1/interviews/{interview_id}/chat`: Sends candidate answer and gets next AI question.

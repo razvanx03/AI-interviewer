@@ -11,12 +11,12 @@ class Settings(BaseSettings):
         "http://localhost:3000",
     ]
     
-    # AI & Model settings (Ready for Ollama & Embeddings later)
+    # AI & Model settings (Placeholders - configured in .env)
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    DEFAULT_LLM_MODEL: str = os.getenv("DEFAULT_LLM_MODEL", "llama3:latest")
-    DEFAULT_EMBEDDING_MODEL: str = os.getenv("DEFAULT_EMBEDDING_MODEL", "nomic-embed-text")
+    DEFAULT_LLM_MODEL: str = os.getenv("DEFAULT_LLM_MODEL", "your-llm-model-name")
+    DEFAULT_EMBEDDING_MODEL: str = os.getenv("DEFAULT_EMBEDDING_MODEL", "your-embedding-model-name")
     
-    # Database settings (Ready for PostgreSQL + pgvector later)
+    # Database settings (Loaded securely from .env, must be a PostgreSQL async connection)
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/ai_interviewer")
     
     class Config:

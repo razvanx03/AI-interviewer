@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Loader2, CheckCircle2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { ThinkingOrb } from 'thinking-orbs';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { InterviewSession, ChatMessage } from '@/types';
-import { generateMockAiResponse } from '@/lib/mockAi';
-import { saveInterview } from '@/lib/storage';
+import { apiStreamSendMessage } from '@/lib/api';
+import { useLanguage } from '@/hooks/use-language';
 
 interface ChatInterfaceProps {
   session: InterviewSession;
@@ -16,6 +17,8 @@ interface ChatInterfaceProps {
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSessionUpdate }) => {
   const [inputText, setInputText] = useState('');
   const [isAiThinking, setIsAiThinking] = useState(false);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const { t } = useLanguage();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -25,63 +28,94 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
 
   useEffect(() => {
     scrollToBottom();
-  }, [session.messages, isAiThinking]);
+  }, [session.messages]);
 
   const handleSendMessage = async () => {
     const text = inputText.trim();
     if (!text || isAiThinking || session.status === 'completed') return;
 
+    setInputText('');
+    setIsAiThinking(true);
+    setStreamingMessageId(null);
+
+    const now = new Date().toISOString();
     const userMessage: ChatMessage = {
       id: Math.random().toString(36).substring(2, 9),
       role: 'user',
       content: text,
-      timestamp: new Date().toISOString(),
+      createdAt: now,
     };
 
-    const updatedMessages = [...session.messages, userMessage];
-    const updatedSession: InterviewSession = {
+    const assistantTempId = Math.random().toString(36).substring(2, 9);
+    let accumulatedText = '';
+    let hasStartedStreaming = false;
+
+    // Add ONLY user message initially
+    const messagesWithUser = [...session.messages, userMessage];
+    onSessionUpdate({
       ...session,
-      messages: updatedMessages,
-      updatedAt: new Date().toISOString(),
-    };
-
-    onSessionUpdate(updatedSession);
-    saveInterview(updatedSession);
-    setInputText('');
-    setIsAiThinking(true);
+      messages: messagesWithUser,
+      updatedAt: now,
+    });
 
     try {
-      const aiResponse = await generateMockAiResponse(updatedSession, text);
+      await apiStreamSendMessage(
+        session.id,
+        text,
+        (chunk: string) => {
+          accumulatedText += chunk;
 
-      const aiMessage: ChatMessage = {
-        id: Math.random().toString(36).substring(2, 9),
-        role: 'assistant',
-        content: aiResponse.reply,
-        timestamp: new Date().toISOString(),
-        questionNumber: updatedMessages.filter((m) => m.role === 'assistant').length + 1,
-      };
+          if (!hasStartedStreaming) {
+            hasStartedStreaming = true;
+            setIsAiThinking(false); // Disappear initial loading indicator
+            setStreamingMessageId(assistantTempId); // Show solving orb to the right of the streaming text
+          }
 
-      const finalSession: InterviewSession = {
-        ...updatedSession,
-        messages: [...updatedMessages, aiMessage],
-        status: aiResponse.isComplete ? 'completed' : 'active',
-        updatedAt: new Date().toISOString(),
-      };
+          const assistantMsg: ChatMessage = {
+            id: assistantTempId,
+            role: 'assistant',
+            content: accumulatedText,
+            createdAt: new Date().toISOString(),
+          };
 
-      onSessionUpdate(finalSession);
-      saveInterview(finalSession);
+          onSessionUpdate({
+            ...session,
+            messages: [...messagesWithUser, assistantMsg],
+            updatedAt: new Date().toISOString(),
+          });
+        },
+        (data) => {
+          setIsAiThinking(false);
+          setStreamingMessageId(null); // Dismiss solving orb once complete
+          const finalAssistantMsg: ChatMessage = {
+            id: data.messageId || assistantTempId,
+            role: 'assistant',
+            content: accumulatedText.trim(),
+            questionNumber: data.questionNumber,
+            createdAt: new Date().toISOString(),
+          };
 
-      if (aiResponse.isComplete) {
-        confetti({
-          particleCount: 80,
-          spread: 70,
-          origin: { y: 0.6 },
-        });
-      }
+          const finalSession: InterviewSession = {
+            ...session,
+            messages: [...messagesWithUser, finalAssistantMsg],
+            status: data.isComplete ? 'completed' : 'active',
+            updatedAt: new Date().toISOString(),
+          };
+          onSessionUpdate(finalSession);
+
+          if (data.isComplete) {
+            confetti({
+              particleCount: 80,
+              spread: 70,
+              origin: { y: 0.6 },
+            });
+          }
+        }
+      );
     } catch (err) {
-      console.error('Error generating AI response:', err);
-    } finally {
+      console.error('Error in chat stream:', err);
       setIsAiThinking(false);
+      setStreamingMessageId(null);
     }
   };
 
@@ -93,119 +127,133 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
   };
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-border/80 bg-card shadow-sm">
-      {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
-        {session.messages.map((msg, index) => {
-          const isAssistant = msg.role === 'assistant';
-          return (
-            <div
-              key={msg.id || index}
-              className={`flex items-start gap-3 sm:gap-4 ${
-                isAssistant ? 'justify-start' : 'justify-end'
-              }`}
-            >
-              {isAssistant && (
-                <div className="flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-xs">
-                  <Bot className="h-4 w-4 sm:h-5 sm:w-5" />
-                </div>
-              )}
+    <div className="flex h-full flex-col overflow-hidden bg-background">
+      {/* Scrollable Message List */}
+      <div className="flex-1 overflow-y-auto p-3 sm:p-6">
+        <div className="mx-auto max-w-3xl space-y-4 sm:space-y-6">
+          {session.messages.map((msg) => {
+            const isAssistant = msg.role === 'assistant';
+            const isCurrentlyStreaming = streamingMessageId === msg.id;
 
+            return (
               <div
-                className={`flex max-w-[85%] sm:max-w-[75%] flex-col ${
-                  isAssistant ? 'items-start' : 'items-end'
+                key={msg.id}
+                className={`flex items-start gap-2.5 sm:gap-3 ${
+                  isAssistant ? 'justify-start' : 'justify-end'
                 }`}
               >
-                <div className="mb-1 flex items-center gap-2">
-                  <span className="text-xs font-semibold text-foreground">
-                    {isAssistant ? 'AI Interviewer' : session.candidateName}
-                  </span>
-                  {isAssistant && msg.questionNumber && (
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                      Question #{msg.questionNumber}
-                    </Badge>
-                  )}
-                  <span className="text-[10px] text-muted-foreground">
-                    {new Date(msg.timestamp).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
-                </div>
+                {isAssistant && (
+                  <div className="flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-primary text-primary-foreground shadow-xs">
+                    <Bot className="h-3.5 w-3.5 sm:h-5 sm:w-5" />
+                  </div>
+                )}
 
                 <div
-                  className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
-                    isAssistant
-                      ? 'rounded-tl-xs bg-muted/60 text-foreground border border-border/60 shadow-2xs'
-                      : 'rounded-tr-xs bg-primary text-primary-foreground shadow-xs'
+                  className={`flex max-w-[92%] sm:max-w-[80%] flex-col ${
+                    isAssistant ? 'items-start' : 'items-end'
                   }`}
                 >
-                  {msg.content}
+                  <div className="mb-1 flex items-center gap-1.5 sm:gap-2">
+                    <span className="text-xs font-semibold text-foreground">
+                      {isAssistant ? t.chat.aiTitle : session.candidateName}
+                    </span>
+                    {isAssistant && msg.questionNumber && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
+                        {t.chat.questionBadge}
+                        {msg.questionNumber}
+                      </Badge>
+                    )}
+                    <span className="text-[10px] text-muted-foreground">
+                      {msg.createdAt
+                        ? new Date(msg.createdAt).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : ''}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`rounded-2xl px-3.5 py-2.5 sm:px-4 sm:py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+                        isAssistant
+                          ? 'rounded-tl-xs bg-muted/60 text-foreground border border-border shadow-2xs'
+                          : 'rounded-tr-xs bg-primary text-primary-foreground shadow-xs'
+                      }`}
+                    >
+                      {msg.content}
+                    </div>
+
+                    {isAssistant && isCurrentlyStreaming && (
+                      <div className="flex shrink-0 items-center justify-center animate-in fade-in duration-200">
+                        <ThinkingOrb state="solving" size={20} />
+                      </div>
+                    )}
+                  </div>
                 </div>
+
+                {!isAssistant && (
+                  <div className="flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-secondary text-secondary-foreground border border-border">
+                    <User className="h-3.5 w-3.5 sm:h-5 sm:w-5 text-foreground" />
+                  </div>
+                )}
               </div>
+            );
+          })}
 
-              {!isAssistant && (
-                <div className="flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-secondary-foreground border border-border/60">
-                  <User className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
-                </div>
-              )}
+          {/* AI Typing / Generating indicator with ThinkingOrb solving */}
+          {isAiThinking && (
+            <div className="flex items-start gap-2.5 sm:gap-3">
+              <div className="flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-primary text-primary-foreground shadow-xs">
+                <Bot className="h-3.5 w-3.5 sm:h-5 sm:w-5" />
+              </div>
+              <div className="flex items-center gap-2 rounded-2xl rounded-tl-xs bg-muted/60 border border-border px-3.5 py-2.5 sm:px-4 sm:py-3 text-xs text-muted-foreground">
+                <ThinkingOrb state="solving" size={20} />
+                <span>{t.chat.thinking}</span>
+              </div>
             </div>
-          );
-        })}
+          )}
 
-        {/* AI Typing / Generating indicator */}
-        {isAiThinking && (
-          <div className="flex items-start gap-3">
-            <div className="flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground animate-pulse">
-              <Bot className="h-4 w-4 sm:h-5 sm:w-5" />
+          {/* Completed Interview Banner */}
+          {session.status === 'completed' && (
+            <div className="my-4 sm:my-6 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 sm:p-5 text-center">
+              <div className="mx-auto mb-2 flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-600">
+                <CheckCircle2 className="h-5 w-5 sm:h-6 sm:w-6" />
+              </div>
+              <h4 className="text-sm sm:text-base font-bold text-foreground">
+                {t.chat.completedTitle}
+              </h4>
+              <p className="mt-1 text-xs text-muted-foreground">{t.chat.completedDesc}</p>
             </div>
-            <div className="flex items-center gap-2 rounded-2xl rounded-tl-xs bg-muted/60 border border-border/60 px-4 py-3 text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-              <span>Interviewer is evaluating and formulating question...</span>
-            </div>
-          </div>
-        )}
+          )}
 
-        {/* Completed Interview Banner */}
-        {session.status === 'completed' && (
-          <div className="my-6 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-5 text-center">
-            <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-600">
-              <CheckCircle2 className="h-6 w-6" />
-            </div>
-            <h4 className="text-base font-bold text-foreground">Interview Session Completed</h4>
-            <p className="mt-1 text-xs text-muted-foreground">
-              All questions have been completed. This transcript is preserved locally in your
-              browser.
-            </p>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
-      {/* Input Area */}
-      <div className="border-t border-border/80 bg-background/50 p-4">
-        {session.status === 'completed' ? (
-          <div className="flex items-center justify-between py-2 text-xs text-muted-foreground">
-            <span>Interview has concluded. Thank you for participating!</span>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <div className="relative flex items-end gap-2">
+      {/* Docked Bottom Input Area */}
+      <div className="border-t border-border bg-card/60 p-3 sm:p-4 backdrop-blur">
+        <div className="mx-auto max-w-3xl">
+          {session.status === 'completed' ? (
+            <div className="flex items-center justify-center py-2 text-xs text-muted-foreground">
+              <span>{t.chat.concludedText}</span>
+            </div>
+          ) : (
+            <div className="relative flex items-center">
               <Textarea
                 ref={textareaRef}
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Type your response... (Press Enter to send, Shift+Enter for new line)"
-                className="min-h-[70px] resize-none pr-12 text-sm"
+                placeholder={t.chat.inputPlaceholder}
+                className="min-h-[48px] h-[48px] sm:min-h-[52px] sm:h-[52px] max-h-32 resize-none pr-12 py-3 sm:py-3.5 text-sm leading-tight"
                 disabled={isAiThinking}
               />
               <Button
                 onClick={handleSendMessage}
                 disabled={!inputText.trim() || isAiThinking}
                 size="icon"
-                className="absolute bottom-2.5 right-2.5 h-8 w-8 rounded-lg shadow-sm"
+                className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-lg shadow-xs"
               >
                 {isAiThinking ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -214,12 +262,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
                 )}
               </Button>
             </div>
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground px-1">
-              <span>💡 Be concise and specific with examples from your experience</span>
-              <span>Enter ↵ to send</span>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

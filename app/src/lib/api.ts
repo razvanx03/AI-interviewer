@@ -1,0 +1,247 @@
+import {
+  CreateInterviewInput,
+  InterviewSession,
+  ChatMessage,
+  ExperienceLevel,
+  InterviewStatus,
+} from '@/types';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+
+interface ApiRawMessage {
+  id: string;
+  role: 'assistant' | 'user' | 'system';
+  content: string;
+  created_at: string;
+  question_number?: number | null;
+  feedback?: string | null;
+}
+
+interface ApiInterviewResponse {
+  id: string;
+  job_title: string;
+  company_name: string | null;
+  job_description: string;
+  experience_level: ExperienceLevel;
+  candidate_name: string;
+  cv_filename: string | null;
+  status: InterviewStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function apiListInterviews(ids?: string[]): Promise<InterviewSession[]> {
+  try {
+    const url =
+      ids && ids.length > 0
+        ? `${API_BASE}/interviews?ids=${encodeURIComponent(ids.join(','))}`
+        : `${API_BASE}/interviews`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const list: ApiInterviewResponse[] = await res.json();
+    return list.map((data) => ({
+      id: data.id,
+      jobTitle: data.job_title,
+      companyName: data.company_name || undefined,
+      jobDescription: data.job_description,
+      experienceLevel: data.experience_level,
+      candidateName: data.candidate_name,
+      cvFileName: data.cv_filename || undefined,
+      status: data.status,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+      messages: [],
+    }));
+  } catch (error) {
+    console.warn('Failed to list interviews from API:', error);
+    return [];
+  }
+}
+
+export async function apiCreateInterview(input: CreateInterviewInput): Promise<InterviewSession> {
+  const res = await fetch(`${API_BASE}/interviews`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      job_title: input.jobTitle,
+      company_name: input.companyName || null,
+      job_description: input.jobDescription,
+      experience_level: input.experienceLevel,
+      candidate_name: input.candidateName || 'Candidate',
+      cv_filename: input.cvFileName || null,
+      cv_raw_text: input.cvRawText || null,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to create interview: ${res.statusText}`);
+  }
+
+  const data: ApiInterviewResponse = await res.json();
+  const msgRes = await fetch(`${API_BASE}/interviews/${data.id}/messages`);
+  const rawMessages: ApiRawMessage[] = msgRes.ok ? await msgRes.json() : [];
+
+  return {
+    id: data.id,
+    jobTitle: data.job_title,
+    companyName: data.company_name || undefined,
+    jobDescription: data.job_description,
+    experienceLevel: data.experience_level,
+    candidateName: data.candidate_name,
+    cvFileName: data.cv_filename || undefined,
+    status: data.status,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+    messages: rawMessages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      createdAt: m.created_at,
+      timestamp: m.created_at,
+      questionNumber: m.question_number ?? undefined,
+      feedback: m.feedback ?? undefined,
+    })),
+  };
+}
+
+export async function apiGetInterview(id: string): Promise<InterviewSession | null> {
+  try {
+    const res = await fetch(`${API_BASE}/interviews/${id}`);
+    if (!res.ok) return null;
+    const data: ApiInterviewResponse = await res.json();
+
+    const msgRes = await fetch(`${API_BASE}/interviews/${id}/messages`);
+    const rawMessages: ApiRawMessage[] = msgRes.ok ? await msgRes.json() : [];
+
+    return {
+      id: data.id,
+      jobTitle: data.job_title,
+      companyName: data.company_name || undefined,
+      jobDescription: data.job_description,
+      experienceLevel: data.experience_level,
+      candidateName: data.candidate_name,
+      cvFileName: data.cv_filename || undefined,
+      status: data.status,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+      messages: rawMessages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        createdAt: m.created_at,
+        timestamp: m.created_at,
+        questionNumber: m.question_number ?? undefined,
+        feedback: m.feedback ?? undefined,
+      })),
+    };
+  } catch (error) {
+    console.warn('API error, falling back to local store:', error);
+    return null;
+  }
+}
+
+export async function apiSendMessage(
+  interviewId: string,
+  content: string
+): Promise<{ message: ChatMessage; isComplete: boolean }> {
+  const res = await fetch(`${API_BASE}/interviews/${interviewId}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to send message: ${res.statusText}`);
+  }
+
+  const data = await res.json();
+  return {
+    message: {
+      id: data.message.id,
+      role: data.message.role,
+      content: data.message.content,
+      createdAt: data.message.created_at,
+      timestamp: data.message.created_at,
+      questionNumber: data.message.question_number ?? undefined,
+      feedback: data.message.feedback ?? undefined,
+    },
+    isComplete: data.is_complete,
+  };
+}
+
+export async function apiStreamSendMessage(
+  interviewId: string,
+  content: string,
+  onChunk: (chunk: string) => void,
+  onComplete: (data: { isComplete: boolean; questionNumber?: number; messageId?: string }) => void
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/interviews/${interviewId}/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+
+  if (!res.ok || !res.body) {
+    throw new Error(`Failed to stream: ${res.statusText}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('data: ')) {
+        const jsonStr = trimmed.substring(6);
+        try {
+          const payload = JSON.parse(jsonStr);
+          if (payload.chunk) {
+            onChunk(payload.chunk);
+          }
+          if (payload.done) {
+            onComplete({
+              isComplete: payload.is_complete,
+              questionNumber: payload.question_number,
+              messageId: payload.message_id,
+            });
+          }
+        } catch {
+          // ignore partial JSON parse
+        }
+      }
+    }
+  }
+}
+
+export async function apiCompleteInterview(id: string): Promise<InterviewSession | null> {
+  try {
+    const res = await fetch(`${API_BASE}/interviews/${id}/complete`, {
+      method: 'POST',
+    });
+    if (!res.ok) return null;
+    return await apiGetInterview(id);
+  } catch (error) {
+    console.error('Failed to complete interview on backend:', error);
+    return null;
+  }
+}
+
+export async function apiDeleteInterview(id: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/interviews/${id}`, {
+      method: 'DELETE',
+    });
+    return res.ok;
+  } catch (error) {
+    console.error('Failed to delete interview from backend:', error);
+    return false;
+  }
+}

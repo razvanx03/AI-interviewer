@@ -1,0 +1,65 @@
+name: ai_interviewer
+
+services:
+  # 1. PostgreSQL Database with pgvector Extension
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ai_interviewer
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ai_interviewer"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. FastAPI Python Backend Server
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: api
+    container_name: api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/ai_interviewer
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - DEFAULT_LLM_MODEL=your-llm-model-name
+      - DEFAULT_EMBEDDING_MODEL=your-embedding-model-name
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./api:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # 3. React + Vite + Tailwind Frontend SPA
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    image: app
+    container_name: app
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000/api/v1
+    volumes:
+      - ./app:/app
+      - /app/node_modules
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
