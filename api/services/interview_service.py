@@ -1,13 +1,14 @@
+import re
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Any, Dict, Tuple
 from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.interview import Interview
 from models.message import Message
-from schemas.interview import InterviewCreate, InterviewResponse, InterviewStatus, ExperienceLevel
+from schemas.interview import InterviewCreate, InterviewResponse, InterviewStatus, ExperienceLevel, CandidateItem
 from schemas.chat import ChatMessage, MessageRole, ChatResponse
 from llm.base import BaseLLMProvider
 from llm.mock_provider import MockLLMProvider
@@ -15,24 +16,120 @@ from llm.mock_provider import MockLLMProvider
 class InterviewService:
     """
     Session and interview orchestrator powered by PostgreSQL via SQLAlchemy AsyncSession.
+    Supports multi-CV candidate screening, scoring, and automated top candidate selection.
     """
 
     def __init__(self, llm_provider: Optional[BaseLLMProvider] = None):
         self.llm = llm_provider or MockLLMProvider()
 
+    def screen_candidates(
+        self, job_title: str, job_description: str, experience_level: str, candidates: List[Any]
+    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """
+        Evaluate and rank candidates against job requirements.
+        Returns (top_candidate, screening_results).
+        """
+        results = []
+        jd_words = set(re.findall(r'\b[a-zA-Z0-9+#.-]{3,}\b', (job_title + " " + job_description).lower()))
+
+        tech_catalogue = [
+            "React", "TypeScript", "JavaScript", "Python", "FastAPI", "Django", "Node.js",
+            "PostgreSQL", "MySQL", "MongoDB", "Redis", "Docker", "Kubernetes", "AWS",
+            "GCP", "GraphQL", "REST", "CI/CD", "Tailwind", "Next.js", "Java", "Go", "Rust"
+        ]
+
+        for cand in candidates:
+            cand_name = cand.name if hasattr(cand, "name") else cand.get("name", "Candidate")
+            cand_cv = cand.cv_raw_text if hasattr(cand, "cv_raw_text") else cand.get("cv_raw_text", "")
+            cand_file = cand.cv_filename if hasattr(cand, "cv_filename") else cand.get("cv_filename")
+
+            cv_text_lower = (cand_cv or "").lower()
+            cv_words = set(re.findall(r'\b[a-zA-Z0-9+#.-]{3,}\b', cv_text_lower))
+
+            matched_keywords = list(jd_words.intersection(cv_words))
+            strengths = [t for t in tech_catalogue if t.lower() in cv_text_lower]
+            if not strengths:
+                strengths = matched_keywords[:4] if matched_keywords else ["Relevant Technical Background"]
+
+            overlap_ratio = len(matched_keywords) / max(len(jd_words), 1)
+            raw_score = int(min(98, max(45, 55 + overlap_ratio * 40 + len(strengths) * 3)))
+
+            summary = f"Verified {len(strengths)} core competencies matching requirements."
+            if "senior" in (experience_level or "").lower():
+                summary = f"Strong senior-level alignment in {', '.join(strengths[:3])}."
+            elif strengths:
+                summary = f"Demonstrated domain proficiency in {', '.join(strengths[:3])}."
+
+            results.append({
+                "name": cand_name,
+                "cv_filename": cand_file,
+                "cv_raw_text": cand_cv,
+                "match_score": raw_score,
+                "strengths": strengths[:5],
+                "summary": summary,
+                "is_selected": False,
+            })
+
+        results.sort(key=lambda x: x["match_score"], reverse=True)
+        if results:
+            results[0]["is_selected"] = True
+            top_candidate = results[0]
+        else:
+            top_candidate = {
+                "name": "Candidate",
+                "cv_filename": None,
+                "cv_raw_text": None,
+                "match_score": 90,
+                "strengths": ["General Technical Aptitude"],
+                "summary": "Direct applicant profile evaluated.",
+                "is_selected": True,
+            }
+
+        return top_candidate, results
+
     async def create_interview(self, db: AsyncSession, data: InterviewCreate) -> Interview:
         interview_id = str(uuid.uuid4())[:8]  # Clean 8-char shareable ID
         now = datetime.now(timezone.utc)
+
+        # Prepare candidate pool
+        candidates_list = []
+        if data.candidates and len(data.candidates) > 0:
+            candidates_list = data.candidates
+        else:
+            candidates_list = [
+                CandidateItem(
+                    name=data.candidate_name or "Candidate",
+                    cv_filename=data.cv_filename,
+                    cv_raw_text=data.cv_raw_text,
+                )
+            ]
+
+        exp_level_str = data.experience_level.value if isinstance(data.experience_level, ExperienceLevel) else str(data.experience_level)
+        top_cand, screening_results = self.screen_candidates(
+            job_title=data.job_title,
+            job_description=data.job_description,
+            experience_level=exp_level_str,
+            candidates=candidates_list,
+        )
 
         interview = Interview(
             id=interview_id,
             job_title=data.job_title,
             company_name=data.company_name,
             job_description=data.job_description,
-            experience_level=data.experience_level.value if isinstance(data.experience_level, ExperienceLevel) else str(data.experience_level),
-            candidate_name=data.candidate_name or "Candidate",
-            cv_filename=data.cv_filename,
-            cv_raw_text=data.cv_raw_text,
+            experience_level=exp_level_str,
+            candidate_name=top_cand["name"],
+            cv_filename=top_cand["cv_filename"],
+            cv_raw_text=top_cand["cv_raw_text"],
+            candidates_pool=[
+                {
+                    "name": c.name if hasattr(c, "name") else c["name"],
+                    "cv_filename": c.cv_filename if hasattr(c, "cv_filename") else c.get("cv_filename"),
+                    "cv_raw_text": c.cv_raw_text if hasattr(c, "cv_raw_text") else c.get("cv_raw_text"),
+                }
+                for c in candidates_list
+            ],
+            screening_results=screening_results,
             status=InterviewStatus.ACTIVE.value,
             created_at=now,
             updated_at=now,
@@ -41,10 +138,17 @@ class InterviewService:
 
         # Create initial greeting and opening question
         company_phrase = f" at {interview.company_name}" if interview.company_name else ""
+        screening_phrase = ""
+        if len(candidates_list) > 1:
+            screening_phrase = (
+                f"After evaluating {len(candidates_list)} candidate resumes against our requirements, "
+                f"your profile emerged as the top match ({top_cand['match_score']}% alignment).\n\n"
+            )
+
         intro_content = (
             f"Hello {interview.candidate_name}! Welcome to your technical interview for the "
             f"**{interview.job_title}** role{company_phrase}. "
-            f"I have reviewed your resume and the job requirements.\n\n"
+            f"{screening_phrase}"
             f"To begin, could you introduce yourself briefly and highlight your background relevant to this position?"
         )
 

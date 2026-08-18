@@ -1,6 +1,6 @@
 import datetime
-from typing import List, Optional
-from sqlalchemy import String, Text, DateTime
+from typing import List, Optional, Any, Dict
+from sqlalchemy import String, Text, DateTime, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db.base import Base
 
@@ -16,6 +16,8 @@ class Interview(Base):
     cv_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     cv_raw_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     cv_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    candidates_pool: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSON, nullable=True)
+    screening_results: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="active")  # 'active' | 'completed'
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.timezone.utc)

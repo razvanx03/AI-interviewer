@@ -12,6 +12,24 @@ export interface ChatMessage {
   feedback?: string;
 }
 
+export interface CandidateItem {
+  id?: string;
+  name: string;
+  cvFileName?: string;
+  cvRawText?: string;
+  file?: File | null;
+  fileSizeFormatted?: string;
+}
+
+export interface CandidateScreeningResult {
+  name: string;
+  match_score: number;
+  strengths: string[];
+  summary: string;
+  is_selected: boolean;
+  cv_filename?: string;
+}
+
 export interface InterviewSession {
   id: string;
   jobTitle: string;
@@ -20,8 +38,11 @@ export interface InterviewSession {
   experienceLevel: ExperienceLevel;
   candidateName: string;
   cvFileName?: string;
+  cvRawText?: string;
   cvSummary?: string;
   cvSkills?: string[];
+  candidatesPool?: CandidateItem[];
+  screeningResults?: CandidateScreeningResult[];
   status: InterviewStatus;
   createdAt: string;
   updatedAt: string;
@@ -34,7 +55,8 @@ export interface CreateInterviewInput {
   companyName?: string;
   jobDescription: string;
   experienceLevel: ExperienceLevel;
-  candidateName: string;
+  candidates?: CandidateItem[];
+  candidateName?: string;
   cvFile?: File | null;
   cvFileName?: string;
   cvRawText?: string;
