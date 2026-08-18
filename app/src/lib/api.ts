@@ -4,6 +4,7 @@ import {
   ChatMessage,
   ExperienceLevel,
   InterviewStatus,
+  CandidateScreeningResult,
 } from '@/types';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
@@ -25,6 +26,9 @@ interface ApiInterviewResponse {
   experience_level: ExperienceLevel;
   candidate_name: string;
   cv_filename: string | null;
+  cv_raw_text?: string | null;
+  candidates_pool?: Array<{ name: string; cv_filename?: string; cv_raw_text?: string }> | null;
+  screening_results?: CandidateScreeningResult[] | null;
   status: InterviewStatus;
   created_at: string;
   updated_at: string;
@@ -47,6 +51,13 @@ export async function apiListInterviews(ids?: string[]): Promise<InterviewSessio
       experienceLevel: data.experience_level,
       candidateName: data.candidate_name,
       cvFileName: data.cv_filename || undefined,
+      cvRawText: data.cv_raw_text || undefined,
+      candidatesPool: data.candidates_pool?.map((c) => ({
+        name: c.name,
+        cvFileName: c.cv_filename,
+        cvRawText: c.cv_raw_text,
+      })),
+      screeningResults: data.screening_results || undefined,
       status: data.status,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
@@ -59,18 +70,25 @@ export async function apiListInterviews(ids?: string[]): Promise<InterviewSessio
 }
 
 export async function apiCreateInterview(input: CreateInterviewInput): Promise<InterviewSession> {
+  const payload = {
+    job_title: input.jobTitle,
+    company_name: input.companyName || null,
+    job_description: input.jobDescription,
+    experience_level: input.experienceLevel,
+    candidate_name: input.candidateName || input.candidates?.[0]?.name || 'Candidate',
+    cv_filename: input.cvFileName || input.candidates?.[0]?.cvFileName || null,
+    cv_raw_text: input.cvRawText || input.candidates?.[0]?.cvRawText || null,
+    candidates: input.candidates?.map((c) => ({
+      name: c.name,
+      cv_filename: c.cvFileName || c.file?.name || null,
+      cv_raw_text: c.cvRawText || null,
+    })),
+  };
+
   const res = await fetch(`${API_BASE}/interviews`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      job_title: input.jobTitle,
-      company_name: input.companyName || null,
-      job_description: input.jobDescription,
-      experience_level: input.experienceLevel,
-      candidate_name: input.candidateName || 'Candidate',
-      cv_filename: input.cvFileName || null,
-      cv_raw_text: input.cvRawText || null,
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!res.ok) {
@@ -89,6 +107,13 @@ export async function apiCreateInterview(input: CreateInterviewInput): Promise<I
     experienceLevel: data.experience_level,
     candidateName: data.candidate_name,
     cvFileName: data.cv_filename || undefined,
+    cvRawText: data.cv_raw_text || undefined,
+    candidatesPool: data.candidates_pool?.map((c) => ({
+      name: c.name,
+      cvFileName: c.cv_filename,
+      cvRawText: c.cv_raw_text,
+    })),
+    screeningResults: data.screening_results || undefined,
     status: data.status,
     createdAt: data.created_at,
     updatedAt: data.updated_at,
@@ -121,6 +146,13 @@ export async function apiGetInterview(id: string): Promise<InterviewSession | nu
       experienceLevel: data.experience_level,
       candidateName: data.candidate_name,
       cvFileName: data.cv_filename || undefined,
+      cvRawText: data.cv_raw_text || undefined,
+      candidatesPool: data.candidates_pool?.map((c) => ({
+        name: c.name,
+        cvFileName: c.cv_filename,
+        cvRawText: c.cv_raw_text,
+      })),
+      screeningResults: data.screening_results || undefined,
       status: data.status,
       createdAt: data.created_at,
       updatedAt: data.updated_at,

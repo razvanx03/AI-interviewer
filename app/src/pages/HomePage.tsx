@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/hooks/use-language';
 import { useInterviews } from '@/hooks/use-interviews';
 import { AppLayoutContextType } from '@/components/layout/AppLayout';
-import { CreateInterviewInput } from '@/types';
+import { CreateInterviewInput, InterviewSession } from '@/types';
 import { apiCreateInterview } from '@/lib/api';
 
 export const HomePage: React.FC = () => {
@@ -20,17 +20,22 @@ export const HomePage: React.FC = () => {
     document.title = `${t.brand.name} - ${t.brand.subtitle}`;
   }, [t]);
 
-  const handleCreateInterview = async (input: CreateInterviewInput) => {
+  const handleCreateSession = async (input: CreateInterviewInput): Promise<InterviewSession> => {
     setIsCreating(true);
     try {
       const session = await apiCreateInterview(input);
       addInterview(session);
-      navigate(`/interview/${session.id}`);
+      return session;
     } catch (err) {
-      console.error('Failed to create interview:', err);
+      console.error('Failed to create interview session:', err);
+      throw err;
     } finally {
       setIsCreating(false);
     }
+  };
+
+  const handleStartInterview = (session: InterviewSession) => {
+    navigate(`/interview/${session.id}`);
   };
 
   return (
@@ -65,10 +70,14 @@ export const HomePage: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Content Form */}
-      <main className="flex-1 overflow-y-auto p-3 sm:p-6 flex justify-center items-start sm:items-center">
-        <div className="w-full max-w-2xl py-2 sm:py-0">
-          <CreateInterviewForm onSubmit={handleCreateInterview} isLoading={isCreating} />
+      {/* Main Content Form - 3-Step Wizard */}
+      <main className="flex-1 overflow-y-auto p-3 sm:p-6 md:p-8 flex justify-center items-start">
+        <div className="w-full max-w-2xl py-2 sm:py-4 pb-12">
+          <CreateInterviewForm
+            onCreateSession={handleCreateSession}
+            onStartInterview={handleStartInterview}
+            isLoading={isCreating}
+          />
         </div>
       </main>
     </div>

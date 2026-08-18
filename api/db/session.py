@@ -41,9 +41,14 @@ async def init_db() -> None:
     """Initialize PostgreSQL database tables asynchronously on startup.
     Fails fast with exception if PostgreSQL is unreachable.
     """
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("PostgreSQL database tables verified and initialized successfully.")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("PostgreSQL database tables verified and initialized successfully.")
+    except Exception as exc:
+        safe_url = db_url.split("@")[-1] if "@" in db_url else db_url
+        logger.error("DATABASE CONNECTION FAILED on [%s]: %s", safe_url, exc, exc_info=True)
+        raise
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency that provides an async database session per request."""

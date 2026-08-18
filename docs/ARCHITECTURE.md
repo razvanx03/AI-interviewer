@@ -42,16 +42,17 @@ The **AI-Powered Job Interviewer** is a modern, privacy-centric platform designe
 
 - **Framework**: React 18 + Vite + TypeScript.
 - **Routing**: `react-router-dom` declarative page routes:
-  - `/` -> `HomePage` (New Interview Configuration Wizard)
+  - `/` -> `HomePage` (New Interview Configuration Wizard & Multi-Candidate Pool)
   - `/interview/:id` -> `InterviewRoomPage` (Real-time AI Chat stream & Transcript)
   - `*` -> `NotFoundPage` (404 Screen)
 - **Layout**: `AppLayout` rendering persistent `Sidebar` and dynamic `Outlet`.
 - **UI Components**: Strict shadcn/ui components (`Button`, `Card`, `Dialog`, `Input`, `Textarea`, `Badge`, `Select`, `Separator`).
+- **Screening & Wizard**: 3-Step Setup Wizard (Role Details -> Multi-CV Candidate Pool -> AI Winner Selection & Candidate Invite Link).
 - **Styling**: Tailwind CSS with Zinc/Neutral dark palette (`#09090b`).
 - **Internationalization (i18n)**: English (🇬🇧) and Romanian (🇷🇴) dictionary managed via `LanguageProvider` & `useLanguage()`.
 - **State & Context**: `InterviewProvider` & `useInterviews()` hook syncing PostgreSQL transcripts and `localStorage` cache.
 
-- **`api/`**: Asynchronous Python backend powered by FastAPI and SQLAlchemy 2.0 with PostgreSQL persistence.
+- **`api/`**: Asynchronous Python backend powered by FastAPI and SQLAlchemy 2.0 with PostgreSQL persistence and automated multi-candidate scoring.
 - **`llm/`**: Standalone AI & Prompt Engineering layer with `BaseLLMProvider` abstractions.
 - **`docs/`**: Mirrored documentation tree reflecting each component and folder in the application.
 - **`docker-compose.yml`**: 3-container microservices environment (`frontend`, `backend`, `db`). See [`docs/docker.md`](file:///c:/Users/ander/Desktop/AI%20interviewer/docs/docker.md).
