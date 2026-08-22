@@ -65,21 +65,28 @@ export const InterviewSidebar: React.FC<InterviewSidebarProps> = ({ session }) =
             <p className="italic text-muted-foreground">No CV file attached (General profile)</p>
           )}
 
-          {session.cvSkills && session.cvSkills.length > 0 && (
-            <div>
-              <p className="mb-1.5 flex items-center gap-1 text-muted-foreground">
-                <Award className="h-3.5 w-3.5 text-amber-500" />
-                Detected Skills & Competencies
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {session.cvSkills.map((skill, i) => (
-                  <Badge key={i} variant="outline" className="text-[10px]">
-                    {skill}
-                  </Badge>
-                ))}
+          {/* Detected Candidate Strengths from Screening */}
+          {(() => {
+            const topResult =
+              session.screeningResults?.find((r) => r.is_selected) || session.screeningResults?.[0];
+            const strengths = topResult?.strengths;
+            if (!strengths || strengths.length === 0) return null;
+            return (
+              <div>
+                <p className="mb-1.5 flex items-center gap-1 text-muted-foreground">
+                  <Award className="h-3.5 w-3.5 text-amber-500" />
+                  Detected Skills & Competencies
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {strengths.map((skill, i) => (
+                    <Badge key={i} variant="outline" className="text-[10px]">
+                      {skill}
+                    </Badge>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </CardContent>
       </Card>
     </div>

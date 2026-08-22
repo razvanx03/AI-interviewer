@@ -32,7 +32,14 @@ import {
 } from '@/components/ui/select';
 import { CVUploader } from '@/components/forms/CVUploader';
 import { useLanguage } from '@/hooks/use-language';
-import { CreateInterviewInput, ExperienceLevel, CandidateItem, InterviewSession } from '@/types';
+import {
+  CreateInterviewInput,
+  ExperienceLevel,
+  CandidateItem,
+  InterviewSession,
+  CandidateScreeningResult,
+} from '@/types';
+import { apiScreenCandidates } from '@/lib/api';
 
 interface CreateInterviewFormProps {
   onCreateSession: (data: CreateInterviewInput) => Promise<InterviewSession>;
@@ -51,7 +58,14 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
   const [jobDescription, setJobDescription] = useState('');
   const [experienceLevel, setExperienceLevel] = useState<ExperienceLevel>('senior');
   const [candidates, setCandidates] = useState<CandidateItem[]>([]);
+
+  // Screening & Session state
+  const [screeningResults, setScreeningResults] = useState<CandidateScreeningResult[]>([]);
+  const [topCandidate, setTopCandidate] = useState<CandidateScreeningResult | null>(null);
   const [createdSession, setCreatedSession] = useState<InterviewSession | null>(null);
+
+  const [isScreening, setIsScreening] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const { t } = useLanguage();
@@ -102,6 +116,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
     setCurrentStep(2);
   };
 
+  // Step 2 -> 3: Pure Screening evaluation (Does NOT start or save active interview in history yet)
   const handleStep2Screen = async (e: React.FormEvent) => {
     e.preventDefault();
     if (candidates.length === 0) {
@@ -109,19 +124,63 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
       return;
     }
     setFormError(null);
+    setIsScreening(true);
 
     try {
-      const session = await onCreateSession({
+      const res = await apiScreenCandidates({
         jobTitle: jobTitle.trim(),
         companyName: companyName.trim() || undefined,
         jobDescription: jobDescription.trim(),
         experienceLevel,
         candidates,
       });
-      setCreatedSession(session);
+      setTopCandidate(res.top_candidate);
+      setScreeningResults(res.screening_results);
       setCurrentStep(3);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to screen candidates.');
+    } finally {
+      setIsScreening(false);
+    }
+  };
+
+  // Helper to ensure database session is created only when needed (on Start or on Copy Link)
+  const getOrCreateSession = async (): Promise<InterviewSession> => {
+    if (createdSession) return createdSession;
+    const session = await onCreateSession({
+      jobTitle: jobTitle.trim(),
+      companyName: companyName.trim() || undefined,
+      jobDescription: jobDescription.trim(),
+      experienceLevel,
+      candidates,
+    });
+    setCreatedSession(session);
+    return session;
+  };
+
+  const handleStartLiveInterview = async () => {
+    setIsStarting(true);
+    setFormError(null);
+    try {
+      const session = await getOrCreateSession();
+      onStartInterview(session);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Failed to start interview.');
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
+  const handleCopyLink = async () => {
+    setFormError(null);
+    try {
+      const session = await getOrCreateSession();
+      const inviteUrl = `${window.location.origin}/interview/${session.id}`;
+      navigator.clipboard.writeText(inviteUrl);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2500);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Failed to generate invite link.');
     }
   };
 
@@ -177,19 +236,15 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
     ]);
   };
 
-  const handleCopyLink = () => {
-    if (!createdSession) return;
-    const inviteUrl = `${window.location.origin}/interview/${createdSession.id}`;
-    navigator.clipboard.writeText(inviteUrl);
-    setIsCopied(true);
-    setTimeout(() => setIsCopied(false), 2500);
-  };
-
-  const topCandidateResult =
+  const activeTopCandidate =
+    topCandidate ||
     createdSession?.screeningResults?.find((r) => r.is_selected) ||
     createdSession?.screeningResults?.[0];
-  const otherCandidatesResults =
-    createdSession?.screeningResults?.filter((r) => r !== topCandidateResult) || [];
+
+  const activeOtherCandidates =
+    screeningResults.length > 0
+      ? screeningResults.filter((r) => r.name !== activeTopCandidate?.name)
+      : createdSession?.screeningResults?.filter((r) => r !== activeTopCandidate) || [];
 
   return (
     <div className="w-full space-y-4">
@@ -260,12 +315,12 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
         {/* Step 3 Button */}
         <button
           type="button"
-          disabled={!createdSession}
+          disabled={!activeTopCandidate && !createdSession}
           onClick={() => {
-            if (createdSession) setCurrentStep(3);
+            if (activeTopCandidate || createdSession) setCurrentStep(3);
           }}
           className={`flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2 rounded-lg px-2 sm:px-3 py-2 text-xs sm:text-sm font-medium transition-all ${
-            !createdSession
+            !activeTopCandidate && !createdSession
               ? 'opacity-40 cursor-not-allowed text-muted-foreground'
               : currentStep === 3
                 ? 'bg-primary text-primary-foreground shadow-xs font-semibold cursor-pointer'
@@ -279,7 +334,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                 : 'bg-muted text-muted-foreground'
             }`}
           >
-            {createdSession ? <Trophy className="h-3.5 w-3.5" /> : '3'}
+            {activeTopCandidate || createdSession ? <Trophy className="h-3.5 w-3.5" /> : '3'}
           </div>
           <span className="truncate hidden sm:inline">{t.form.step3Title}</span>
           <span className="truncate sm:hidden">3. Selection</span>
@@ -506,11 +561,11 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
 
                   <Button
                     type="submit"
-                    disabled={isLoading || candidates.length === 0}
+                    disabled={isScreening || candidates.length === 0}
                     size="lg"
                     className="w-full sm:flex-1 gap-2 text-sm sm:text-base font-semibold h-11 sm:h-12 cursor-pointer shadow-sm"
                   >
-                    {isLoading ? (
+                    {isScreening ? (
                       <div className="flex items-center gap-2">
                         <ThinkingOrb state="working" size={20} />
                         <span>{t.form.generatingButton}</span>
@@ -529,7 +584,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
         )}
 
         {/* STEP 3: AI SCREENING SELECTION & INVITATION HUB */}
-        {currentStep === 3 && createdSession && (
+        {currentStep === 3 && activeTopCandidate && (
           <>
             <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-4">
               <div className="flex items-center gap-2.5 min-w-0">
@@ -548,76 +603,81 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
             </CardHeader>
 
             <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0 space-y-4">
-              {/* Winning Selected Candidate Card */}
-              {topCandidateResult && (
-                <div className="rounded-xl border-2 border-primary/50 bg-primary/5 p-4 sm:p-4.5 shadow-sm space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2.5">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                        <Trophy className="h-4.5 w-4.5" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm sm:text-base font-bold text-foreground">
-                            {topCandidateResult.name}
-                          </h4>
-                          <Badge className="bg-primary hover:bg-primary text-[10px] uppercase font-bold tracking-wider px-1.5 h-4.5">
-                            {t.form.selectedBadge}
-                          </Badge>
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {topCandidateResult.summary}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-base sm:text-lg font-extrabold text-primary">
-                        {topCandidateResult.match_score}%
-                      </div>
-                      <span className="text-[10px] text-muted-foreground uppercase font-semibold">
-                        {t.screeningModal.matchScore}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Match Progress Bar */}
-                  <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
-                    <div
-                      className="bg-primary h-2 rounded-full transition-all duration-700 ease-out"
-                      style={{ width: `${topCandidateResult.match_score}%` }}
-                    />
-                  </div>
-
-                  {/* Identified Strengths */}
-                  {topCandidateResult.strengths && topCandidateResult.strengths.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pt-0.5">
-                      {topCandidateResult.strengths.map((str, i) => (
-                        <Badge
-                          key={i}
-                          variant="secondary"
-                          className="text-[11px] font-normal gap-1 bg-background/80 border border-border/60"
-                        >
-                          <CheckCircle2 className="h-2.5 w-2.5 text-emerald-500" />
-                          {str}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
+              {formError && (
+                <div className="flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs font-medium text-destructive">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span>{formError}</span>
                 </div>
               )}
 
+              {/* Winning Selected Candidate Card */}
+              <div className="rounded-xl border-2 border-primary/50 bg-primary/5 p-4 sm:p-4.5 shadow-sm space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                      <Trophy className="h-4.5 w-4.5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm sm:text-base font-bold text-foreground">
+                          {activeTopCandidate.name}
+                        </h4>
+                        <Badge className="bg-primary hover:bg-primary text-[10px] uppercase font-bold tracking-wider px-1.5 h-4.5">
+                          {t.form.selectedBadge}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {activeTopCandidate.summary}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-base sm:text-lg font-extrabold text-primary">
+                      {activeTopCandidate.match_score}%
+                    </div>
+                    <span className="text-[10px] text-muted-foreground uppercase font-semibold">
+                      {t.screeningModal.matchScore}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Match Progress Bar */}
+                <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                  <div
+                    className="bg-primary h-2 rounded-full transition-all duration-700 ease-out"
+                    style={{ width: `${activeTopCandidate.match_score}%` }}
+                  />
+                </div>
+
+                {/* Identified Strengths */}
+                {activeTopCandidate.strengths && activeTopCandidate.strengths.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {activeTopCandidate.strengths.map((str, i) => (
+                      <Badge
+                        key={i}
+                        variant="secondary"
+                        className="text-[11px] font-normal gap-1 bg-background/80 border border-border/60"
+                      >
+                        <CheckCircle2 className="h-2.5 w-2.5 text-emerald-500" />
+                        {str}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Other Evaluated Candidates List */}
-              {otherCandidatesResults.length > 0 && (
+              {activeOtherCandidates.length > 0 && (
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground px-1">
                     <Award className="h-3.5 w-3.5" />
                     <span>
-                      {t.form.otherApplicants} ({otherCandidatesResults.length})
+                      {t.form.otherApplicants} ({activeOtherCandidates.length})
                     </span>
                   </div>
 
                   <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                    {otherCandidatesResults.map((cand, idx) => (
+                    {activeOtherCandidates.map((cand, idx) => (
                       <div
                         key={idx}
                         className="flex items-center justify-between rounded-lg border border-border/70 bg-card/60 p-2 px-3 text-xs"
@@ -653,7 +713,11 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                 <div className="flex items-center gap-2">
                   <Input
                     readOnly
-                    value={`${window.location.origin}/interview/${createdSession.id}`}
+                    value={
+                      createdSession
+                        ? `${window.location.origin}/interview/${createdSession.id}`
+                        : `${window.location.origin}/interview/invite-link`
+                    }
                     className="h-9 text-xs font-mono bg-background text-muted-foreground select-all"
                   />
                   <Button
@@ -694,12 +758,22 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
 
                 <Button
                   type="button"
-                  onClick={() => onStartInterview(createdSession)}
+                  onClick={handleStartLiveInterview}
+                  disabled={isStarting || isLoading}
                   size="lg"
                   className="w-full sm:flex-1 gap-2 text-sm sm:text-base font-semibold h-11 sm:h-12 cursor-pointer shadow-sm"
                 >
-                  <span>{t.form.startInterviewNow}</span>
-                  <ExternalLink className="h-4 w-4" />
+                  {isStarting ? (
+                    <div className="flex items-center gap-2">
+                      <ThinkingOrb state="working" size={20} />
+                      <span>{t.form.generatingButton}</span>
+                    </div>
+                  ) : (
+                    <>
+                      <span>{t.form.startInterviewNow}</span>
+                      <ExternalLink className="h-4 w-4" />
+                    </>
+                  )}
                 </Button>
               </div>
             </CardContent>

@@ -16,7 +16,11 @@ The application is orchestrated as a 3-container microservices environment using
 
 ---
 
-## 2. Quick Start
+### Prerequisites
+Copy `.env.example` to `.env` before starting containers (all variables are strictly validated with zero default fallbacks):
+```bash
+cp .env.example .env
+```
 
 ### Start all containers in background
 ```bash

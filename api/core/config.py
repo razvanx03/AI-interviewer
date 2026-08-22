@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "../.env"),
         case_sensitive=True,
         extra="ignore",
     )

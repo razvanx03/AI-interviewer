@@ -28,9 +28,11 @@ The **AI-Powered Job Interviewer** is a modern, privacy-centric platform designe
                                      v
 +-------------------------------------------------------------------------+
 |                         PostgreSQL Database (pgvector)                  |
-|  - Table: `interviews` (UUID, job title, company, candidate, CV text)   |
-|  - Table: `messages` (UUID, interview_id, role, content, timestamps)    |
-|  - Strictly exclusive PostgreSQL persistence                            |
+|  - Table: `interviews` (UUID, job title, company, enums, timestamps)    |
+|  - Table: `candidates` (UUID, interview_id FK, name, CV, score, status)|
+|  - Table: `messages` (UUID, interview_id FK, role ENUM, content, q_num) |
+|  - Native Enums: `experience_level_enum`, `interview_status_enum`, etc. |
+|  - Schema Migrations managed strictly via Alembic                       |
 +-------------------------------------------------------------------------+
 ```
 
@@ -52,7 +54,7 @@ The **AI-Powered Job Interviewer** is a modern, privacy-centric platform designe
 - **Internationalization (i18n)**: English (🇬🇧) and Romanian (🇷🇴) dictionary managed via `LanguageProvider` & `useLanguage()`.
 - **State & Context**: `InterviewProvider` & `useInterviews()` hook syncing PostgreSQL transcripts and `localStorage` cache.
 
-- **`api/`**: Asynchronous Python backend powered by FastAPI and SQLAlchemy 2.0 with PostgreSQL persistence and automated multi-candidate scoring.
+- **`api/`**: Asynchronous Python backend powered by FastAPI, SQLAlchemy 2.0 with PostgreSQL persistence, automated multi-candidate scoring, and version-controlled schema migrations via **Alembic** (`alembic/versions/`).
 - **`llm/`**: Standalone AI & Prompt Engineering layer with `BaseLLMProvider` abstractions.
 - **`docs/`**: Mirrored documentation tree reflecting each component and folder in the application.
 - **`docker-compose.yml`**: 3-container microservices environment (`frontend`, `backend`, `db`). See [`docs/docker.md`](file:///c:/Users/ander/Desktop/AI%20interviewer/docs/docker.md).

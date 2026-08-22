@@ -30,6 +30,11 @@ export interface CandidateScreeningResult {
   cv_filename?: string;
 }
 
+export interface CandidateScreeningResponse {
+  top_candidate: CandidateScreeningResult;
+  screening_results: CandidateScreeningResult[];
+}
+
 export interface InterviewSession {
   id: string;
   jobTitle: string;
@@ -39,8 +44,6 @@ export interface InterviewSession {
   candidateName: string;
   cvFileName?: string;
   cvRawText?: string;
-  cvSummary?: string;
-  cvSkills?: string[];
   candidatesPool?: CandidateItem[];
   screeningResults?: CandidateScreeningResult[];
   status: InterviewStatus;
