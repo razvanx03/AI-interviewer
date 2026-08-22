@@ -70,7 +70,7 @@ For full container documentation, see [`docs/docker.md`](docs/docker.md).
 ### Option 2: Local Development
 
 #### 1. Database (PostgreSQL)
-Ensure a PostgreSQL instance is running on `localhost:5432` with database `ai_interviewer`. Configure credentials in `api/.env`:
+Ensure a PostgreSQL instance is running on `localhost:5432` with database `ai_interviewer`. Configure credentials in the root `.env`:
 ```env
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/ai_interviewer
 ```

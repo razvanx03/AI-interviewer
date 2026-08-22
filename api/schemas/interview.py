@@ -26,15 +26,41 @@ class CandidateScreeningResult(BaseModel):
     strengths: List[str] = Field(default_factory=list, description="Key candidate strengths relevant to job")
     summary: str = Field(..., description="Short screening summary of candidate")
     is_selected: bool = Field(False, description="True if chosen as the winning candidate")
+    cv_filename: Optional[str] = None
+    cv_raw_text: Optional[str] = None
+
+class CandidateScreeningRequest(BaseModel):
+    job_title: str = Field(..., description="Job role/title")
+    company_name: Optional[str] = Field(None, description="Company name")
+    job_description: str = Field(..., description="Job requirements")
+    experience_level: ExperienceLevel = Field(default=ExperienceLevel.MID, description="Seniority level")
+    candidates: List[CandidateItem] = Field(..., min_length=1, description="List of candidate resumes")
+
+class CandidateScreeningResponse(BaseModel):
+    top_candidate: Dict[str, Any]
+    screening_results: List[CandidateScreeningResult]
+
+class CandidateResponse(BaseModel):
+    id: str
+    interview_id: str
+    name: str
+    cv_filename: Optional[str] = None
+    cv_raw_text: Optional[str] = None
+    match_score: Optional[int] = None
+    strengths: Optional[List[str]] = None
+    summary: Optional[str] = None
+    is_selected: bool = False
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 class InterviewCreate(BaseModel):
     job_title: str = Field(..., description="Job role/title (e.g. Senior Backend Engineer)")
     company_name: Optional[str] = Field(None, description="Company name")
     job_description: str = Field(..., description="Job description or list of requirements")
     experience_level: ExperienceLevel = Field(default=ExperienceLevel.MID, description="Seniority level")
-    # Multi-candidate pool
     candidates: Optional[List[CandidateItem]] = Field(None, description="Pool of candidates to screen")
-    # Single candidate fallback (backward compatibility)
     candidate_name: Optional[str] = Field("Candidate", description="Candidate's name")
     cv_filename: Optional[str] = Field(None, description="Uploaded CV filename")
     cv_raw_text: Optional[str] = Field(None, description="Extracted text from CV")
@@ -48,6 +74,7 @@ class InterviewResponse(BaseModel):
     candidate_name: Optional[str] = "Candidate"
     cv_filename: Optional[str] = None
     cv_raw_text: Optional[str] = None
+    candidates: List[CandidateResponse] = []
     candidates_pool: Optional[List[Dict[str, Any]]] = None
     screening_results: Optional[List[Dict[str, Any]]] = None
     status: InterviewStatus = InterviewStatus.ACTIVE

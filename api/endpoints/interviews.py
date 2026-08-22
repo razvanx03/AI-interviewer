@@ -3,11 +3,27 @@ from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.session import get_db
-from schemas.interview import InterviewCreate, InterviewResponse
+from schemas.interview import (
+    InterviewCreate,
+    InterviewResponse,
+    CandidateScreeningRequest,
+    CandidateScreeningResponse,
+)
 from schemas.chat import ChatMessage
 from services.interview_service import interview_service
 
 router = APIRouter()
+
+@router.post("/screen", response_model=CandidateScreeningResponse)
+async def screen_candidates_endpoint(data: CandidateScreeningRequest):
+    """Screen and rank candidate resumes without creating database session records yet."""
+    top_cand, results = interview_service.screen_candidates(
+        job_title=data.job_title,
+        job_description=data.job_description,
+        experience_level=data.experience_level.value,
+        candidates=data.candidates,
+    )
+    return CandidateScreeningResponse(top_candidate=top_cand, screening_results=results)
 
 @router.post("", response_model=InterviewResponse, status_code=status.HTTP_201_CREATED)
 async def create_interview(data: InterviewCreate, db: AsyncSession = Depends(get_db)):
@@ -69,3 +85,13 @@ async def delete_interview(interview_id: str, db: AsyncSession = Depends(get_db)
             detail=f"Interview with ID '{interview_id}' was not found",
         )
     return None
+
+# ==============================================================================
+# [DEV ONLY - TEMPORARY TESTING ENDPOINT TO BE REMOVED LATER]
+# ==============================================================================
+@router.delete("/admin/clear-all", status_code=status.HTTP_200_OK)
+async def clear_entire_database(db: AsyncSession = Depends(get_db)):
+    """[DEV ONLY] Temporary testing endpoint to truncate all tables in database."""
+    await interview_service.clear_all_data(db)
+    return {"message": "Database truncated successfully."}
+

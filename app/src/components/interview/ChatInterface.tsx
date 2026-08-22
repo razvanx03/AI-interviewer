@@ -177,8 +177,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
                     <div
                       className={`rounded-2xl px-3.5 py-2.5 sm:px-4 sm:py-3 text-sm leading-relaxed whitespace-pre-wrap ${
                         isAssistant
-                          ? 'rounded-tl-xs bg-muted/60 text-foreground border border-border shadow-2xs'
-                          : 'rounded-tr-xs bg-primary text-primary-foreground shadow-xs'
+                          ? 'rounded-tl-xs bg-primary text-primary-foreground shadow-xs'
+                          : 'rounded-tr-xs bg-muted/80 dark:bg-card text-foreground border border-border shadow-2xs'
                       }`}
                     >
                       {msg.content}
@@ -207,7 +207,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
               <div className="flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-primary text-primary-foreground shadow-xs">
                 <Bot className="h-3.5 w-3.5 sm:h-5 sm:w-5" />
               </div>
-              <div className="flex items-center gap-2 rounded-2xl rounded-tl-xs bg-muted/60 border border-border px-3.5 py-2.5 sm:px-4 sm:py-3 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2 rounded-2xl rounded-tl-xs bg-primary text-primary-foreground shadow-xs px-3.5 py-2.5 sm:px-4 sm:py-3 text-xs">
                 <ThinkingOrb state="solving" size={20} />
                 <span>{t.chat.thinking}</span>
               </div>
@@ -253,7 +253,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
                 onClick={handleSendMessage}
                 disabled={!inputText.trim() || isAiThinking}
                 size="icon"
-                className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-lg shadow-xs"
+                className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-lg shadow-xs transition-all duration-150 hover:opacity-90 hover:scale-105 active:scale-95 cursor-pointer disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:opacity-40 disabled:opacity-40"
               >
                 {isAiThinking ? (
                   <Loader2 className="h-4 w-4 animate-spin" />

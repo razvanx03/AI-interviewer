@@ -8,7 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.interview import Interview
 from models.message import Message
-from schemas.interview import InterviewCreate, InterviewResponse, InterviewStatus, ExperienceLevel, CandidateItem
+from models.candidate import Candidate
+from schemas.interview import (
+    InterviewCreate,
+    InterviewResponse,
+    InterviewStatus,
+    ExperienceLevel,
+    CandidateItem,
+    CandidateResponse,
+)
 from schemas.chat import ChatMessage, MessageRole, ChatResponse
 from llm.base import BaseLLMProvider
 from llm.mock_provider import MockLLMProvider
@@ -48,30 +56,32 @@ class InterviewService:
 
             matched_keywords = list(jd_words.intersection(cv_words))
             strengths = [t for t in tech_catalogue if t.lower() in cv_text_lower]
-            if not strengths:
-                strengths = matched_keywords[:4] if matched_keywords else ["Relevant Technical Background"]
 
-            overlap_ratio = len(matched_keywords) / max(len(jd_words), 1)
-            raw_score = int(min(98, max(45, 55 + overlap_ratio * 40 + len(strengths) * 3)))
+            if not strengths and matched_keywords:
+                strengths = [kw.capitalize() for kw in matched_keywords[:4]]
 
-            summary = f"Verified {len(strengths)} core competencies matching requirements."
-            if "senior" in (experience_level or "").lower():
-                summary = f"Strong senior-level alignment in {', '.join(strengths[:3])}."
-            elif strengths:
-                summary = f"Demonstrated domain proficiency in {', '.join(strengths[:3])}."
+            base_score = 65
+            keyword_boost = min(len(matched_keywords) * 5, 25)
+            strengths_boost = min(len(strengths) * 3, 10)
+            match_score = min(base_score + keyword_boost + strengths_boost, 99)
+
+            if len(strengths) > 0:
+                summary = f"Strong alignment in {', '.join(strengths[:3])}. Demonstrated relevant background matching the job description."
+            else:
+                summary = "Solid general engineering foundation with adaptable skill set for the position."
 
             results.append({
                 "name": cand_name,
                 "cv_filename": cand_file,
                 "cv_raw_text": cand_cv,
-                "match_score": raw_score,
-                "strengths": strengths[:5],
+                "match_score": match_score,
+                "strengths": strengths if strengths else ["Analytical Problem Solving", "System Design"],
                 "summary": summary,
                 "is_selected": False,
             })
 
         results.sort(key=lambda x: x["match_score"], reverse=True)
-        if results:
+        if len(results) > 0:
             results[0]["is_selected"] = True
             top_candidate = results[0]
         else:
@@ -104,11 +114,16 @@ class InterviewService:
                 )
             ]
 
-        exp_level_str = data.experience_level.value if isinstance(data.experience_level, ExperienceLevel) else str(data.experience_level)
+        exp_enum = (
+            data.experience_level
+            if isinstance(data.experience_level, ExperienceLevel)
+            else ExperienceLevel(data.experience_level)
+        )
+
         top_cand, screening_results = self.screen_candidates(
             job_title=data.job_title,
             job_description=data.job_description,
-            experience_level=exp_level_str,
+            experience_level=exp_enum.value,
             candidates=candidates_list,
         )
 
@@ -117,24 +132,31 @@ class InterviewService:
             job_title=data.job_title,
             company_name=data.company_name,
             job_description=data.job_description,
-            experience_level=exp_level_str,
+            experience_level=exp_enum,
             candidate_name=top_cand["name"],
             cv_filename=top_cand["cv_filename"],
             cv_raw_text=top_cand["cv_raw_text"],
-            candidates_pool=[
-                {
-                    "name": c.name if hasattr(c, "name") else c["name"],
-                    "cv_filename": c.cv_filename if hasattr(c, "cv_filename") else c.get("cv_filename"),
-                    "cv_raw_text": c.cv_raw_text if hasattr(c, "cv_raw_text") else c.get("cv_raw_text"),
-                }
-                for c in candidates_list
-            ],
-            screening_results=screening_results,
-            status=InterviewStatus.ACTIVE.value,
+            status=InterviewStatus.ACTIVE,
             created_at=now,
             updated_at=now,
         )
         db.add(interview)
+
+        # Add relational Candidate entries
+        for res in screening_results:
+            cand_model = Candidate(
+                id=str(uuid.uuid4())[:8],
+                interview_id=interview_id,
+                name=res["name"],
+                cv_filename=res.get("cv_filename"),
+                cv_raw_text=res.get("cv_raw_text"),
+                match_score=res.get("match_score"),
+                strengths=res.get("strengths", []),
+                summary=res.get("summary"),
+                is_selected=res.get("is_selected", False),
+                created_at=now,
+            )
+            db.add(cand_model)
 
         # Create initial greeting and opening question
         company_phrase = f" at {interview.company_name}" if interview.company_name else ""
@@ -155,7 +177,7 @@ class InterviewService:
         initial_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview.id,
-            role=MessageRole.ASSISTANT.value,
+            role=MessageRole.ASSISTANT,
             content=intro_content,
             question_number=1,
             created_at=now,
@@ -163,14 +185,16 @@ class InterviewService:
         db.add(initial_msg)
 
         await db.commit()
-        await db.refresh(interview)
-        return interview
+        return await self.get_interview(db, interview.id)
 
     async def get_interview(self, db: AsyncSession, interview_id: str) -> Optional[Interview]:
         stmt = (
             select(Interview)
             .where(Interview.id == interview_id)
-            .options(selectinload(Interview.messages))
+            .options(
+                selectinload(Interview.messages),
+                selectinload(Interview.candidates),
+            )
         )
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
@@ -178,7 +202,14 @@ class InterviewService:
     async def list_interviews(
         self, db: AsyncSession, ids: Optional[List[str]] = None
     ) -> List[Interview]:
-        stmt = select(Interview).options(selectinload(Interview.messages)).order_by(Interview.created_at.desc())
+        stmt = (
+            select(Interview)
+            .options(
+                selectinload(Interview.messages),
+                selectinload(Interview.candidates),
+            )
+            .order_by(Interview.created_at.desc())
+        )
         if ids:
             stmt = stmt.where(Interview.id.in_(ids))
         result = await db.execute(stmt)
@@ -195,7 +226,7 @@ class InterviewService:
         return [
             ChatMessage(
                 id=m.id,
-                role=MessageRole(m.role),
+                role=MessageRole(m.role) if isinstance(m.role, str) else m.role,
                 content=m.content,
                 created_at=m.created_at,
                 question_number=m.question_number,
@@ -217,19 +248,26 @@ class InterviewService:
         user_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
-            role=MessageRole.USER.value,
+            role=MessageRole.USER,
             content=candidate_content,
             created_at=now,
         )
         db.add(user_msg)
 
         # Count questions asked so far
-        assistant_questions = [m for m in interview.messages if m.role == MessageRole.ASSISTANT.value and m.question_number]
+        assistant_questions = [
+            m for m in interview.messages
+            if (m.role == MessageRole.ASSISTANT or getattr(m.role, "value", None) == "assistant")
+            and m.question_number
+        ]
         next_q_num = len(assistant_questions) + 1
         is_complete = next_q_num > 5
 
         # 2. Build context for LLM
-        history_payload = [{"role": m.role, "content": m.content} for m in interview.messages]
+        history_payload = [
+            {"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content}
+            for m in interview.messages
+        ]
         history_payload.append({"role": MessageRole.USER.value, "content": candidate_content})
 
         system_prompt = (
@@ -242,14 +280,14 @@ class InterviewService:
         ai_text = await self.llm.generate_response(system_prompt, history_payload)
 
         if is_complete:
-            interview.status = InterviewStatus.COMPLETED.value
+            interview.status = InterviewStatus.COMPLETED
 
         interview.updated_at = now
 
         ai_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
-            role=MessageRole.ASSISTANT.value,
+            role=MessageRole.ASSISTANT,
             content=ai_text,
             question_number=next_q_num if not is_complete else None,
             created_at=datetime.now(timezone.utc),
@@ -283,7 +321,7 @@ class InterviewService:
         user_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
-            role=MessageRole.USER.value,
+            role=MessageRole.USER,
             content=candidate_content,
             created_at=now,
         )
@@ -291,12 +329,19 @@ class InterviewService:
         await db.commit()
 
         # Count questions
-        assistant_questions = [m for m in interview.messages if m.role == MessageRole.ASSISTANT.value and m.question_number]
+        assistant_questions = [
+            m for m in interview.messages
+            if (m.role == MessageRole.ASSISTANT or getattr(m.role, "value", None) == "assistant")
+            and m.question_number
+        ]
         next_q_num = len(assistant_questions) + 1
         is_complete = next_q_num > 5
 
         # 2. Build context for LLM
-        history_payload = [{"role": m.role, "content": m.content} for m in interview.messages]
+        history_payload = [
+            {"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content}
+            for m in interview.messages
+        ]
         history_payload.append({"role": MessageRole.USER.value, "content": candidate_content})
 
         system_prompt = (
@@ -317,7 +362,7 @@ class InterviewService:
         ai_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
-            role=MessageRole.ASSISTANT.value,
+            role=MessageRole.ASSISTANT,
             content=full_ai_response.strip(),
             question_number=next_q_num if not is_complete else None,
             created_at=datetime.now(timezone.utc),
@@ -325,7 +370,7 @@ class InterviewService:
         db.add(ai_msg)
 
         if is_complete:
-            interview.status = InterviewStatus.COMPLETED.value
+            interview.status = InterviewStatus.COMPLETED
         interview.updated_at = datetime.now(timezone.utc)
 
         await db.commit()
@@ -351,13 +396,13 @@ class InterviewService:
             return None
 
         now = datetime.now(timezone.utc)
-        interview.status = InterviewStatus.COMPLETED.value
+        interview.status = InterviewStatus.COMPLETED
         interview.updated_at = now
 
         closing_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
-            role=MessageRole.ASSISTANT.value,
+            role=MessageRole.ASSISTANT,
             content=(
                 f"Thank you, {interview.candidate_name}! The interview session for the **{interview.job_title}** position has concluded. "
                 f"Your answers and transcript have been securely recorded."
@@ -368,6 +413,13 @@ class InterviewService:
         db.add(closing_msg)
         await db.commit()
         await db.refresh(interview)
-        return interview
+    # ==============================================================================
+    # [DEV ONLY - TEMPORARY TESTING METHOD TO BE REMOVED LATER]
+    # ==============================================================================
+    async def clear_all_data(self, db: AsyncSession) -> None:
+        """Truncate all rows across interviews, candidates, and messages."""
+        from sqlalchemy import text
+        await db.execute(text("TRUNCATE TABLE interviews, candidates, messages CASCADE;"))
+        await db.commit()
 
 interview_service = InterviewService()

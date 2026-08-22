@@ -1,8 +1,12 @@
 import datetime
-from typing import Optional
-from sqlalchemy import String, Text, Integer, ForeignKey, DateTime
+from typing import Optional, TYPE_CHECKING
+from sqlalchemy import String, Text, Integer, ForeignKey, DateTime, Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db.base import Base
+from schemas.chat import MessageRole
+
+if TYPE_CHECKING:
+    from models.interview import Interview
 
 class Message(Base):
     __tablename__ = "messages"
@@ -11,7 +15,18 @@ class Message(Base):
     interview_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("interviews.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    role: Mapped[str] = mapped_column(String(50), nullable=False)  # 'system' | 'assistant' | 'user'
+    
+    # Native PostgreSQL Enum for Message Role
+    role: Mapped[MessageRole] = mapped_column(
+        SAEnum(
+            MessageRole,
+            name="message_role_enum",
+            native_enum=True,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        nullable=False,
+    )
+    
     content: Mapped[str] = mapped_column(Text, nullable=False)
     question_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     feedback: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

@@ -5,9 +5,39 @@ import {
   ExperienceLevel,
   InterviewStatus,
   CandidateScreeningResult,
+  CandidateScreeningResponse,
 } from '@/types';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+
+export async function apiScreenCandidates(
+  input: CreateInterviewInput
+): Promise<CandidateScreeningResponse> {
+  const payload = {
+    job_title: input.jobTitle,
+    company_name: input.companyName || null,
+    job_description: input.jobDescription,
+    experience_level: input.experienceLevel,
+    candidates: (input.candidates || []).map((c) => ({
+      name: c.name,
+      cv_filename: c.cvFileName || c.file?.name || null,
+      cv_raw_text: c.cvRawText || null,
+    })),
+  };
+
+  const res = await fetch(`${API_BASE}/interviews/screen`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to screen candidates');
+  }
+
+  return res.json();
+}
 
 interface ApiRawMessage {
   id: string;
@@ -16,6 +46,19 @@ interface ApiRawMessage {
   created_at: string;
   question_number?: number | null;
   feedback?: string | null;
+}
+
+interface ApiCandidateResponse {
+  id: string;
+  interview_id: string;
+  name: string;
+  cv_filename?: string | null;
+  cv_raw_text?: string | null;
+  match_score?: number | null;
+  strengths?: string[] | null;
+  summary?: string | null;
+  is_selected: boolean;
+  created_at: string;
 }
 
 interface ApiInterviewResponse {
@@ -27,6 +70,7 @@ interface ApiInterviewResponse {
   candidate_name: string;
   cv_filename: string | null;
   cv_raw_text?: string | null;
+  candidates?: ApiCandidateResponse[];
   candidates_pool?: Array<{ name: string; cv_filename?: string; cv_raw_text?: string }> | null;
   screening_results?: CandidateScreeningResult[] | null;
   status: InterviewStatus;
@@ -52,12 +96,28 @@ export async function apiListInterviews(ids?: string[]): Promise<InterviewSessio
       candidateName: data.candidate_name,
       cvFileName: data.cv_filename || undefined,
       cvRawText: data.cv_raw_text || undefined,
-      candidatesPool: data.candidates_pool?.map((c) => ({
-        name: c.name,
-        cvFileName: c.cv_filename,
-        cvRawText: c.cv_raw_text,
-      })),
-      screeningResults: data.screening_results || undefined,
+      candidatesPool:
+        data.candidates?.map((c) => ({
+          name: c.name,
+          cvFileName: c.cv_filename || undefined,
+          cvRawText: c.cv_raw_text || undefined,
+        })) ||
+        data.candidates_pool?.map((c) => ({
+          name: c.name,
+          cvFileName: c.cv_filename,
+          cvRawText: c.cv_raw_text,
+        })),
+      screeningResults:
+        data.candidates?.map((c) => ({
+          name: c.name,
+          match_score: c.match_score ?? 0,
+          strengths: c.strengths || [],
+          summary: c.summary || '',
+          is_selected: c.is_selected,
+          cv_filename: c.cv_filename || undefined,
+        })) ||
+        data.screening_results ||
+        undefined,
       status: data.status,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
@@ -108,12 +168,28 @@ export async function apiCreateInterview(input: CreateInterviewInput): Promise<I
     candidateName: data.candidate_name,
     cvFileName: data.cv_filename || undefined,
     cvRawText: data.cv_raw_text || undefined,
-    candidatesPool: data.candidates_pool?.map((c) => ({
-      name: c.name,
-      cvFileName: c.cv_filename,
-      cvRawText: c.cv_raw_text,
-    })),
-    screeningResults: data.screening_results || undefined,
+    candidatesPool:
+      data.candidates?.map((c) => ({
+        name: c.name,
+        cvFileName: c.cv_filename || undefined,
+        cvRawText: c.cv_raw_text || undefined,
+      })) ||
+      data.candidates_pool?.map((c) => ({
+        name: c.name,
+        cvFileName: c.cv_filename,
+        cvRawText: c.cv_raw_text,
+      })),
+    screeningResults:
+      data.candidates?.map((c) => ({
+        name: c.name,
+        match_score: c.match_score ?? 0,
+        strengths: c.strengths || [],
+        summary: c.summary || '',
+        is_selected: c.is_selected,
+        cv_filename: c.cv_filename || undefined,
+      })) ||
+      data.screening_results ||
+      undefined,
     status: data.status,
     createdAt: data.created_at,
     updatedAt: data.updated_at,
@@ -147,12 +223,28 @@ export async function apiGetInterview(id: string): Promise<InterviewSession | nu
       candidateName: data.candidate_name,
       cvFileName: data.cv_filename || undefined,
       cvRawText: data.cv_raw_text || undefined,
-      candidatesPool: data.candidates_pool?.map((c) => ({
-        name: c.name,
-        cvFileName: c.cv_filename,
-        cvRawText: c.cv_raw_text,
-      })),
-      screeningResults: data.screening_results || undefined,
+      candidatesPool:
+        data.candidates?.map((c) => ({
+          name: c.name,
+          cvFileName: c.cv_filename || undefined,
+          cvRawText: c.cv_raw_text || undefined,
+        })) ||
+        data.candidates_pool?.map((c) => ({
+          name: c.name,
+          cvFileName: c.cv_filename,
+          cvRawText: c.cv_raw_text,
+        })),
+      screeningResults:
+        data.candidates?.map((c) => ({
+          name: c.name,
+          match_score: c.match_score ?? 0,
+          strengths: c.strengths || [],
+          summary: c.summary || '',
+          is_selected: c.is_selected,
+          cv_filename: c.cv_filename || undefined,
+        })) ||
+        data.screening_results ||
+        undefined,
       status: data.status,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
@@ -274,6 +366,21 @@ export async function apiDeleteInterview(id: string): Promise<boolean> {
     return res.ok;
   } catch (error) {
     console.error('Failed to delete interview from backend:', error);
+    return false;
+  }
+}
+
+// ==============================================================================
+// [DEV ONLY - TEMPORARY TESTING FUNCTION TO BE REMOVED LATER]
+// ==============================================================================
+export async function apiClearEntireDatabase(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/interviews/admin/clear-all`, {
+      method: 'DELETE',
+    });
+    return res.ok;
+  } catch (error) {
+    console.error('Failed to clear entire database:', error);
     return false;
   }
 }

@@ -50,6 +50,7 @@ venv.bak/
 .env.local
 .env.*.local
 *.env
+!.env.example
 
 # Local Storage / Uploads / Model weights & Databases
 uploads/

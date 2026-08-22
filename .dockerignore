@@ -1,0 +1,27 @@
+# Git
+.git
+.gitignore
+
+# Environments & Secrets
+.env
+.env.*
+!.env.example
+
+# Node / Frontend
+**/node_modules
+**/dist
+**/.vite
+
+# Python / Backend
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache
+**/.coverage
+**/venv
+**/.venv
+
+# Logs & temp
+**/*.log
+**/.DS_Store

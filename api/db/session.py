@@ -1,8 +1,8 @@
 import logging
 from typing import AsyncGenerator
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from core.config import settings
-from db.base import Base
 
 logger = logging.getLogger("api.db")
 
@@ -38,13 +38,13 @@ async_session_maker = async_sessionmaker(
 )
 
 async def init_db() -> None:
-    """Initialize PostgreSQL database tables asynchronously on startup.
-    Fails fast with exception if PostgreSQL is unreachable.
+    """Verify PostgreSQL connectivity on startup.
+    Schema migrations are managed cleanly via Alembic (alembic upgrade head).
     """
     try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("PostgreSQL database tables verified and initialized successfully.")
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        logger.info("PostgreSQL database connection verified successfully.")
     except Exception as exc:
         safe_url = db_url.split("@")[-1] if "@" in db_url else db_url
         logger.error("DATABASE CONNECTION FAILED on [%s]: %s", safe_url, exc, exc_info=True)
