@@ -28,6 +28,7 @@ export interface CandidateScreeningResult {
   summary: string;
   is_selected: boolean;
   cv_filename?: string;
+  cv_raw_text?: string;
 }
 
 export interface CandidateScreeningResponse {

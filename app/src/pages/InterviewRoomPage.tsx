@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
-import { Share2, Check, StopCircle, Bot, Loader2, PanelLeftOpen } from 'lucide-react';
+import { Share2, Check, StopCircle, Bot, PanelLeftOpen } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { ChatInterface } from '@/components/interview/ChatInterface';
 import { NotFoundPage } from '@/pages/NotFoundPage';
@@ -202,7 +202,7 @@ export const InterviewRoomPage: React.FC = () => {
               title={t.header.finish}
             >
               {isEnding ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <ThinkingOrb state="working" size={20} />
               ) : (
                 <StopCircle className="h-3.5 w-3.5" />
               )}
@@ -231,7 +231,11 @@ export const InterviewRoomPage: React.FC = () => {
 
       {/* Main Chat Interface */}
       <main className="flex-1 overflow-hidden">
-        <ChatInterface session={activeSession} onSessionUpdate={handleSessionUpdate} />
+        <ChatInterface
+          session={activeSession}
+          onSessionUpdate={handleSessionUpdate}
+          isEnding={isEnding}
+        />
       </main>
 
       {/* Conclude Interview Confirmation Modal */}

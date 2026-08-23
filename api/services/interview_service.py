@@ -1,10 +1,13 @@
 import re
 import uuid
+import logging
 from datetime import datetime, timezone
-from typing import List, Optional, Any, Dict, Tuple
+from typing import List, Optional, Any, Dict, Tuple, AsyncGenerator
 from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from models.interview import Interview
 from models.message import Message
@@ -18,8 +21,24 @@ from schemas.interview import (
     CandidateResponse,
 )
 from schemas.chat import ChatMessage, MessageRole, ChatResponse
-from llm.base import BaseLLMProvider
-from llm.mock_provider import MockLLMProvider
+from llm import (
+    BaseLLMProvider,
+    get_llm_provider,
+    build_system_interviewer_prompt,
+    build_intro_question_prompt,
+)
+from core.config import settings
+from core.constants import (
+    TECH_CATALOGUE,
+    CLARIFICATION_STEER_THRESHOLD,
+    INTERVIEW_COMPLETE_TOKEN,
+    BASE_SCREENING_SCORE,
+    KEYWORD_MATCH_WEIGHT,
+    MAX_KEYWORD_BOOST,
+    STRENGTH_MATCH_WEIGHT,
+    MAX_STRENGTHS_BOOST,
+    MAX_SCREENING_SCORE,
+)
 
 class InterviewService:
     """
@@ -28,59 +47,37 @@ class InterviewService:
     """
 
     def __init__(self, llm_provider: Optional[BaseLLMProvider] = None):
-        self.llm = llm_provider or MockLLMProvider()
+        if llm_provider:
+            self.llm = llm_provider
+        else:
+            self.llm = get_llm_provider(
+                base_url=settings.OLLAMA_BASE_URL,
+                model_name=settings.DEFAULT_LLM_MODEL,
+            )
 
     def screen_candidates(
         self, job_title: str, job_description: str, experience_level: str, candidates: List[Any]
     ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
         """
-        Evaluate and rank candidates against job requirements.
-        Returns (top_candidate, screening_results).
+        Screening placeholder: preserves full extracted CV details and selects
+        the first candidate in the pool by default (until RAG + pgvector is integrated).
         """
         results = []
-        jd_words = set(re.findall(r'\b[a-zA-Z0-9+#.-]{3,}\b', (job_title + " " + job_description).lower()))
-
-        tech_catalogue = [
-            "React", "TypeScript", "JavaScript", "Python", "FastAPI", "Django", "Node.js",
-            "PostgreSQL", "MySQL", "MongoDB", "Redis", "Docker", "Kubernetes", "AWS",
-            "GCP", "GraphQL", "REST", "CI/CD", "Tailwind", "Next.js", "Java", "Go", "Rust"
-        ]
-
         for cand in candidates:
             cand_name = cand.name if hasattr(cand, "name") else cand.get("name", "Candidate")
             cand_cv = cand.cv_raw_text if hasattr(cand, "cv_raw_text") else cand.get("cv_raw_text", "")
             cand_file = cand.cv_filename if hasattr(cand, "cv_filename") else cand.get("cv_filename")
 
-            cv_text_lower = (cand_cv or "").lower()
-            cv_words = set(re.findall(r'\b[a-zA-Z0-9+#.-]{3,}\b', cv_text_lower))
-
-            matched_keywords = list(jd_words.intersection(cv_words))
-            strengths = [t for t in tech_catalogue if t.lower() in cv_text_lower]
-
-            if not strengths and matched_keywords:
-                strengths = [kw.capitalize() for kw in matched_keywords[:4]]
-
-            base_score = 65
-            keyword_boost = min(len(matched_keywords) * 5, 25)
-            strengths_boost = min(len(strengths) * 3, 10)
-            match_score = min(base_score + keyword_boost + strengths_boost, 99)
-
-            if len(strengths) > 0:
-                summary = f"Strong alignment in {', '.join(strengths[:3])}. Demonstrated relevant background matching the job description."
-            else:
-                summary = "Solid general engineering foundation with adaptable skill set for the position."
-
             results.append({
                 "name": cand_name,
                 "cv_filename": cand_file,
                 "cv_raw_text": cand_cv,
-                "match_score": match_score,
-                "strengths": strengths if strengths else ["Analytical Problem Solving", "System Design"],
-                "summary": summary,
+                "match_score": 90,
+                "strengths": ["Document Verified", "Profile Parsed"],
+                "summary": f"Uploaded candidate profile for {job_title}.",
                 "is_selected": False,
             })
 
-        results.sort(key=lambda x: x["match_score"], reverse=True)
         if len(results) > 0:
             results[0]["is_selected"] = True
             top_candidate = results[0]
@@ -90,7 +87,7 @@ class InterviewService:
                 "cv_filename": None,
                 "cv_raw_text": None,
                 "match_score": 90,
-                "strengths": ["General Technical Aptitude"],
+                "strengths": ["Direct Applicant"],
                 "summary": "Direct applicant profile evaluated.",
                 "is_selected": True,
             }
@@ -127,6 +124,25 @@ class InterviewService:
             candidates=candidates_list,
         )
 
+        # 1. Extract dynamic interview topics from Job Description instantly
+        topics_plan = []
+        lines = [line.strip().lstrip("-*•123456789. ").strip() for line in data.job_description.split("\n") if line.strip()]
+        valid_bullets = [
+            l for l in lines
+            if len(l) > 8 and not l.lower().startswith(("we are", "looking for", "requirements:", "responsibilities:", "core requirements", "about the role"))
+        ]
+        if len(valid_bullets) >= 2:
+            topics_plan = valid_bullets[:5]
+        else:
+            topics_plan = [
+                f"Core {data.job_title} Language & Framework Fundamentals",
+                "Architecture, API Design & Data Flow",
+                "Database Engineering & Query Performance",
+                "Containerization, Microservices & Deployment",
+                "Problem-Solving & Production Edge Cases",
+            ]
+        logger.info("[Interview %s] Dynamic Topics Plan initialized: %s", interview_id, topics_plan)
+
         interview = Interview(
             id=interview_id,
             job_title=data.job_title,
@@ -137,6 +153,11 @@ class InterviewService:
             cv_filename=top_cand["cv_filename"],
             cv_raw_text=top_cand["cv_raw_text"],
             status=InterviewStatus.ACTIVE,
+            active_question_number=1,
+            consecutive_clarifications=0,
+            topics_plan=topics_plan,
+            current_topic_index=0,
+            topic_follow_up_count=0,
             created_at=now,
             updated_at=now,
         )
@@ -158,21 +179,35 @@ class InterviewService:
             )
             db.add(cand_model)
 
-        # Create initial greeting and opening question
-        company_phrase = f" at {interview.company_name}" if interview.company_name else ""
-        screening_phrase = ""
-        if len(candidates_list) > 1:
-            screening_phrase = (
-                f"After evaluating {len(candidates_list)} candidate resumes against our requirements, "
-                f"your profile emerged as the top match ({top_cand['match_score']}% alignment).\n\n"
-            )
-
-        intro_content = (
-            f"Hello {interview.candidate_name}! Welcome to your technical interview for the "
-            f"**{interview.job_title}** role{company_phrase}. "
-            f"{screening_phrase}"
-            f"To begin, could you introduce yourself briefly and highlight your background relevant to this position?"
+        # Create initial greeting and opening question using AI model
+        exp_level_str = exp_enum.value if hasattr(exp_enum, "value") else str(exp_enum)
+        system_prompt = build_system_interviewer_prompt(
+            job_title=interview.job_title,
+            job_description=interview.job_description,
+            experience_level=exp_level_str,
+            company_name=interview.company_name,
+            cv_raw_text=interview.cv_raw_text or "",
+            candidate_name=interview.candidate_name,
+            active_question_number=1,
+            topics_plan=topics_plan,
+            current_topic_index=0,
+            topic_follow_up_count=0,
         )
+        intro_prompt = build_intro_question_prompt(
+            job_title=interview.job_title,
+            job_description=interview.job_description,
+            experience_level=exp_level_str,
+            company_name=interview.company_name,
+            cv_raw_text=interview.cv_raw_text or "",
+            candidate_name=interview.candidate_name,
+        )
+
+        intro_content = await self.llm.generate_response(
+            system_prompt=system_prompt,
+            messages=[{"role": "user", "content": intro_prompt}],
+        )
+        if not intro_content or not intro_content.strip():
+            raise ValueError("Ollama returned an empty opening question.")
 
         initial_msg = Message(
             id=str(uuid.uuid4())[:8],
@@ -244,7 +279,7 @@ class InterviewService:
 
         now = datetime.now(timezone.utc)
 
-        # 1. Insert user message
+        # 1. Save user message to database
         user_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
@@ -253,34 +288,90 @@ class InterviewService:
             created_at=now,
         )
         db.add(user_msg)
+        await db.commit()
 
-        # Count questions asked so far
-        assistant_questions = [
-            m for m in interview.messages
-            if (m.role == MessageRole.ASSISTANT or getattr(m.role, "value", None) == "assistant")
-            and m.question_number
-        ]
-        next_q_num = len(assistant_questions) + 1
-        is_complete = next_q_num > 5
-
-        # 2. Build context for LLM
+        # 2. Query clean, chronological message history from database
+        res = await db.execute(
+            select(Message)
+            .where(Message.interview_id == interview_id)
+            .order_by(Message.created_at.asc())
+        )
+        db_messages = res.scalars().all()
         history_payload = [
             {"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content}
-            for m in interview.messages
+            for m in db_messages
         ]
-        history_payload.append({"role": MessageRole.USER.value, "content": candidate_content})
 
-        system_prompt = (
-            f"You are an expert technical interviewer hiring for: {interview.job_title}.\n"
-            f"Job Description: {interview.job_description}\n"
-            f"Candidate CV Content: {interview.cv_raw_text or 'Not provided'}\n"
-            f"Evaluate responses concisely and ask the next focused question."
+        # Topic state machine: check for skip/pass/continue intents
+        skip_patterns = [
+            r"\b(nu\s+stiu|nu\s+am\s+facut|nu\s+am\s+folosit|nu\s+inteleg|ce\s+inseamna|ce\s+e\s+aia|ce\s+reprezinta)\b",
+            r"\b(skip|pass|let'?s\s+continue|sa\s+continuam|trecem\s+mai\s+departe|alta\s+intrebare|urmatoarea\s+intrebare|next\s+question)\b",
+        ]
+        is_candidate_skip = any(re.search(pat, candidate_content.lower()) for pat in skip_patterns)
+
+        MAX_FOLLOWUPS_PER_TOPIC = 1
+        current_idx = interview.current_topic_index or 0
+        follow_up_count = interview.topic_follow_up_count or 0
+        topics = interview.topics_plan or []
+
+        if is_candidate_skip or follow_up_count >= MAX_FOLLOWUPS_PER_TOPIC:
+            current_idx += 1
+            follow_up_count = 0
+        else:
+            follow_up_count += 1
+
+        interview.current_topic_index = current_idx
+        interview.topic_follow_up_count = follow_up_count
+        all_topics_covered = bool(topics and current_idx >= len(topics))
+
+        exp_level_str = (
+            interview.experience_level.value
+            if hasattr(interview.experience_level, "value")
+            else str(interview.experience_level)
+        )
+        system_prompt = build_system_interviewer_prompt(
+            job_title=interview.job_title,
+            job_description=interview.job_description,
+            experience_level=exp_level_str,
+            company_name=interview.company_name,
+            cv_raw_text=interview.cv_raw_text or "",
+            candidate_name=interview.candidate_name,
+            active_question_number=interview.active_question_number or 1,
+            consecutive_clarifications=interview.consecutive_clarifications,
+            clarification_threshold=CLARIFICATION_STEER_THRESHOLD,
+            topics_plan=topics,
+            current_topic_index=current_idx,
+            topic_follow_up_count=follow_up_count,
+        )
+
+        logger.info(
+            "[Interview %s] PRE-LLM | Q#: %s | Topic [%s/%s]: '%s' (FollowUp #%s) | Last User: '%s'",
+            interview_id,
+            interview.active_question_number,
+            current_idx + 1,
+            len(topics),
+            topics[current_idx] if current_idx < len(topics) else "All Complete",
+            follow_up_count,
+            candidate_content[:50].replace("\n", " "),
         )
 
         ai_text = await self.llm.generate_response(system_prompt, history_payload)
+        if not ai_text or not ai_text.strip():
+            raise ValueError("Ollama returned an empty response.")
+
+        ai_signaled_completion = INTERVIEW_COMPLETE_TOKEN in ai_text
+        hit_safety_limit = (interview.active_question_number or 1) >= settings.SAFETY_MAX_QUESTIONS
+        is_complete = ai_signaled_completion or hit_safety_limit or all_topics_covered
+        cleaned_ai_text = ai_text.replace(INTERVIEW_COMPLETE_TOKEN, "").strip()
 
         if is_complete:
             interview.status = InterviewStatus.COMPLETED
+            interview.active_question_number = None
+            assigned_q_num = None
+            cleaned_ai_text = await self._generate_evaluation_closing(interview, cleaned_ai_text)
+        else:
+            interview.active_question_number = (interview.active_question_number or 1) + 1
+            assigned_q_num = interview.active_question_number
 
         interview.updated_at = now
 
@@ -288,13 +379,19 @@ class InterviewService:
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
             role=MessageRole.ASSISTANT,
-            content=ai_text,
-            question_number=next_q_num if not is_complete else None,
+            content=cleaned_ai_text,
+            question_number=assigned_q_num,
             created_at=datetime.now(timezone.utc),
         )
         db.add(ai_msg)
-
         await db.commit()
+
+        logger.info(
+            "[Interview %s] AI_MSG: '%s' | Question After: %s",
+            interview_id,
+            cleaned_ai_text[:60],
+            assigned_q_num,
+        )
 
         return ChatResponse(
             message=ChatMessage(
@@ -305,19 +402,24 @@ class InterviewService:
                 question_number=ai_msg.question_number,
             ),
             is_complete=is_complete,
-            next_question_number=next_q_num if not is_complete else None,
+            next_question_number=assigned_q_num,
         )
 
     async def stream_candidate_message_and_respond(
         self, db: AsyncSession, interview_id: str, candidate_content: str
-    ):
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         interview = await self.get_interview(db, interview_id)
         if not interview:
+            yield {"error": "Interview session not found."}
+            return
+
+        if interview.status == InterviewStatus.COMPLETED:
+            yield {"chunk": "Acest interviu a fost deja finalizat.", "done": True, "is_complete": True}
             return
 
         now = datetime.now(timezone.utc)
 
-        # 1. Insert user message to database
+        # 1. Save user message to database
         user_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
@@ -328,27 +430,77 @@ class InterviewService:
         db.add(user_msg)
         await db.commit()
 
-        # Count questions
-        assistant_questions = [
-            m for m in interview.messages
-            if (m.role == MessageRole.ASSISTANT or getattr(m.role, "value", None) == "assistant")
-            and m.question_number
-        ]
-        next_q_num = len(assistant_questions) + 1
-        is_complete = next_q_num > 5
-
-        # 2. Build context for LLM
+        # 2. Query clean, chronological message history from database
+        res = await db.execute(
+            select(Message)
+            .where(Message.interview_id == interview_id)
+            .order_by(Message.created_at.asc())
+        )
+        db_messages = res.scalars().all()
         history_payload = [
             {"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content}
-            for m in interview.messages
+            for m in db_messages
         ]
-        history_payload.append({"role": MessageRole.USER.value, "content": candidate_content})
 
-        system_prompt = (
-            f"You are an expert technical interviewer hiring for: {interview.job_title}.\n"
-            f"Job Description: {interview.job_description}\n"
-            f"Candidate CV Content: {interview.cv_raw_text or 'Not provided'}\n"
-            f"Evaluate responses concisely and ask the next focused question."
+        # Topic state machine: check for skip/pass/continue intents
+        skip_patterns = [
+            r"\b(nu\s+stiu|nu\s+am\s+facut|nu\s+am\s+folosit|nu\s+inteleg|ce\s+inseamna|ce\s+e\s+aia|ce\s+reprezinta)\b",
+            r"\b(skip|pass|let'?s\s+continue|sa\s+continuam|trecem\s+mai\s+departe|alta\s+intrebare|urmatoarea\s+intrebare|next\s+question)\b",
+        ]
+        is_candidate_skip = any(re.search(pat, candidate_content.lower()) for pat in skip_patterns)
+
+        MAX_FOLLOWUPS_PER_TOPIC = 1
+        current_idx = interview.current_topic_index or 0
+        follow_up_count = interview.topic_follow_up_count or 0
+        topics = interview.topics_plan or []
+
+        if is_candidate_skip or follow_up_count >= MAX_FOLLOWUPS_PER_TOPIC:
+            current_idx += 1
+            follow_up_count = 0
+        else:
+            follow_up_count += 1
+
+        interview.current_topic_index = current_idx
+        interview.topic_follow_up_count = follow_up_count
+        all_topics_covered = bool(topics and current_idx >= len(topics))
+
+        exp_level_str = (
+            interview.experience_level.value
+            if hasattr(interview.experience_level, "value")
+            else str(interview.experience_level)
+        )
+        system_prompt = build_system_interviewer_prompt(
+            job_title=interview.job_title,
+            job_description=interview.job_description,
+            experience_level=exp_level_str,
+            company_name=interview.company_name,
+            cv_raw_text=interview.cv_raw_text or "",
+            candidate_name=interview.candidate_name,
+            active_question_number=interview.active_question_number or 1,
+            consecutive_clarifications=interview.consecutive_clarifications,
+            clarification_threshold=CLARIFICATION_STEER_THRESHOLD,
+            topics_plan=topics,
+            current_topic_index=current_idx,
+            topic_follow_up_count=follow_up_count,
+        )
+
+        last_assistant_msg = next(
+            (m.content for m in reversed(db_messages) if str(m.role).lower() in ("assistant", "messagerole.assistant")),
+            "None",
+        )
+        last_user_msg = next(
+            (m.content for m in reversed(db_messages) if str(m.role).lower() in ("user", "messagerole.user")),
+            "None",
+        )
+        logger.info(
+            "[Interview %s Streaming] PRE-LLM | Q#: %s | Topic [%s/%s]: '%s' (FollowUp #%s) | Last User: '%s'",
+            interview_id,
+            interview.active_question_number,
+            current_idx + 1,
+            len(topics),
+            topics[current_idx] if current_idx < len(topics) else "All Complete",
+            follow_up_count,
+            last_user_msg[:50].replace("\n", " "),
         )
 
         full_ai_response = ""
@@ -356,32 +508,104 @@ class InterviewService:
 
         async for chunk in stream_gen:
             full_ai_response += chunk
-            yield {"chunk": chunk, "is_complete": False}
+            display_chunk = chunk.replace(INTERVIEW_COMPLETE_TOKEN, "")
+            if display_chunk:
+                yield {"chunk": display_chunk, "is_complete": False}
+
+        if not full_ai_response.strip():
+            raise ValueError("Ollama stream completed with empty response.")
+
+        ai_signaled_completion = INTERVIEW_COMPLETE_TOKEN in full_ai_response
+        hit_safety_limit = (interview.active_question_number or 1) >= settings.SAFETY_MAX_QUESTIONS
+        is_complete = ai_signaled_completion or hit_safety_limit or all_topics_covered
+        cleaned_ai_response = full_ai_response.replace(INTERVIEW_COMPLETE_TOKEN, "").strip()
+
+        if is_complete:
+            interview.status = InterviewStatus.COMPLETED
+            interview.active_question_number = None
+            assigned_q_num = None
+
+            # Generate AI evaluation report and closing evaluation assessment
+            evaluation_closing = await self._generate_evaluation_closing(interview, cleaned_ai_response)
+            
+            # If the streamed response was only [INTERVIEW_COMPLETE], emit the evaluation closing chunk
+            closing_delta = evaluation_closing
+            if cleaned_ai_response and evaluation_closing.startswith(cleaned_ai_response):
+                closing_delta = evaluation_closing[len(cleaned_ai_response):]
+
+            if closing_delta.strip():
+                yield {"chunk": "\n\n" + closing_delta.strip(), "is_complete": True}
+
+            cleaned_ai_response = evaluation_closing
+        else:
+            interview.active_question_number = (interview.active_question_number or 1) + 1
+            assigned_q_num = interview.active_question_number
 
         # 3. Save assistant message to database
         ai_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
             role=MessageRole.ASSISTANT,
-            content=full_ai_response.strip(),
-            question_number=next_q_num if not is_complete else None,
+            content=cleaned_ai_response,
+            question_number=assigned_q_num,
             created_at=datetime.now(timezone.utc),
         )
         db.add(ai_msg)
-
-        if is_complete:
-            interview.status = InterviewStatus.COMPLETED
         interview.updated_at = datetime.now(timezone.utc)
 
         await db.commit()
 
+        logger.info(
+            "[Interview %s Streaming] AI_MSG: '%s' | Question After: %s",
+            interview_id,
+            cleaned_ai_response[:60],
+            assigned_q_num,
+        )
+
         yield {
             "chunk": "",
-            "is_complete": is_complete,
-            "message_id": ai_msg.id,
-            "question_number": ai_msg.question_number,
             "done": True,
+            "is_complete": is_complete,
+            "question_number": assigned_q_num,
+            "message_id": ai_msg.id,
         }
+
+    async def _generate_evaluation_closing(
+        self, interview: Interview, preamble_text: str = ""
+    ) -> str:
+        """Evaluate full interview transcript and generate candidate closing message with scores."""
+        transcript_history = [
+            {"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content}
+            for m in interview.messages
+        ]
+
+        eval_report = await self.llm.evaluate_interview(
+            job_title=interview.job_title,
+            job_description=interview.job_description,
+            candidate_name=interview.candidate_name,
+            cv_raw_text=interview.cv_raw_text or "",
+            transcript=transcript_history,
+        )
+
+        overall_score = eval_report.get("overall_score", 0.0)
+        summary_text = eval_report.get("summary", "Technical interview evaluation completed.")
+        strengths = eval_report.get("strengths", [])
+        strengths_str = "\n".join([f"- {s}" for s in strengths]) if strengths else ""
+        weaknesses = eval_report.get("weaknesses", [])
+        weaknesses_str = "\n".join([f"- {w}" for w in weaknesses]) if weaknesses else ""
+        rec_label = eval_report.get("recommendation", "hire").replace("_", " ").title()
+
+        intro_p = f"{preamble_text.strip()}\n\n" if preamble_text.strip() else ""
+
+        return (
+            f"{intro_p}"
+            f"Thank you, {interview.candidate_name}! The interview session for the **{interview.job_title}** position has concluded.\n\n"
+            f"**Overall AI Assessment: {overall_score}/10** ({rec_label})\n\n"
+            f"{summary_text}\n\n"
+            + (f"**Key Strengths Observed:**\n{strengths_str}\n\n" if strengths_str else "")
+            + (f"**Areas for Improvement / Gaps:**\n{weaknesses_str}\n\n" if weaknesses_str else "")
+            + f"Your full transcript and evaluation data have been recorded."
+        )
 
     async def delete_interview(self, db: AsyncSession, interview_id: str) -> bool:
         stmt = delete(Interview).where(Interview.id == interview_id)
@@ -390,7 +614,7 @@ class InterviewService:
         return result.rowcount > 0
 
     async def complete_interview(self, db: AsyncSession, interview_id: str) -> Optional[Interview]:
-        """Mark an interview as completed and append a closing acknowledgment message."""
+        """Mark an interview as completed, generate AI evaluation report, and append closing message."""
         interview = await self.get_interview(db, interview_id)
         if not interview:
             return None
@@ -399,20 +623,20 @@ class InterviewService:
         interview.status = InterviewStatus.COMPLETED
         interview.updated_at = now
 
+        closing_content = await self._generate_evaluation_closing(interview)
+
         closing_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
             role=MessageRole.ASSISTANT,
-            content=(
-                f"Thank you, {interview.candidate_name}! The interview session for the **{interview.job_title}** position has concluded. "
-                f"Your answers and transcript have been securely recorded."
-            ),
+            content=closing_content,
             question_number=None,
             created_at=now,
         )
         db.add(closing_msg)
         await db.commit()
-        await db.refresh(interview)
+        return await self.get_interview(db, interview.id)
+
     # ==============================================================================
     # [DEV ONLY - TEMPORARY TESTING METHOD TO BE REMOVED LATER]
     # ==============================================================================

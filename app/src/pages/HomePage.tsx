@@ -55,7 +55,7 @@ export const HomePage: React.FC = () => {
           </Button>
 
           <div className="flex items-center gap-2 min-w-0">
-            <div className="hidden sm:flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <div className="hidden sm:flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/15 text-blue-500 dark:text-blue-400 border border-blue-500/30 shadow-2xs">
               <Sparkles className="h-4 w-4" />
             </div>
             <div className="min-w-0">
@@ -72,7 +72,7 @@ export const HomePage: React.FC = () => {
 
       {/* Main Content Form - 3-Step Wizard */}
       <main className="flex-1 overflow-y-auto p-3 sm:p-6 md:p-8 flex justify-center items-start">
-        <div className="w-full max-w-2xl py-2 sm:py-4 pb-12">
+        <div className="w-full max-w-7xl py-2 sm:py-4 pb-12 transition-all duration-200">
           <CreateInterviewForm
             onCreateSession={handleCreateSession}
             onStartInterview={handleStartInterview}

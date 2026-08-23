@@ -34,13 +34,16 @@ For comprehensive technical specifications, refer to [`docs/ARCHITECTURE.md`](do
 
 ## ✨ Key Features
 
+- **Autonomous Goal-Oriented AI Interviewer**: Conducts live, interactive technical interviews driven by a multi-competency assessment checklist. Qwen autonomously decides when sufficient evidence has been gathered to conclude the interview and generate the evaluation report.
+- **Human-Like Dialogue & Clarification Loops**: Candidates can ask technical clarification and counter-questions at any point. The AI answers queries concisely, retains the active interview question state in PostgreSQL, and smoothly steers the candidate back to the problem without skipping topics.
+- **Deterministic State Machine & Failsafe Guards**: PostgreSQL tracks `active_question_number` and consecutive clarifications while maintaining configurable failsafe limits (`SAFETY_MAX_QUESTIONS`) against infinite conversational loops.
 - **ChatGPT/Claude Styled Interface**: Sleek dark/light theme, collapsible navigation rail, search filter, and custom modal dialogs.
 - **Thinking Orbs Animations**: Native 2D canvas visual state indicators (`connecting`, `solving`) powered by [`thinking-orbs`](https://github.com/Jakubantalik/thinking-orbs).
 - **Real-Time Token Streaming**: Server-Sent Events (SSE) streaming pipeline delivering instantaneous AI token rendering.
 - **Persistent PostgreSQL Storage**: Asynchronous session and transcript storage with SQLAlchemy 2.0 and `asyncpg` with cascading cleanups.
 - **Mobile-First Responsive UX**: Mobile drawer with swipe-to-delete gestures, interactive slide arrows, and dynamic header wrapping.
 - **Internationalization (i18n)**: Instant runtime language switching between English (🇬🇧) and Romanian (🇷🇴).
-- **Privacy & Local AI Ready**: Decoupled architecture designed for local Ollama models (Llama 3, Qwen 2.5, DeepSeek) and PostgreSQL + pgvector embeddings.
+- **Privacy & Local AI Ready**: Decoupled architecture serving local Ollama models (Qwen, Llama 3, DeepSeek) with direct CUDA acceleration and PostgreSQL + pgvector embeddings.
 
 ---
 

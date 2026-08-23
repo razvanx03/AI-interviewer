@@ -73,11 +73,8 @@ class InterviewResponse(BaseModel):
     experience_level: ExperienceLevel
     candidate_name: Optional[str] = "Candidate"
     cv_filename: Optional[str] = None
-    cv_raw_text: Optional[str] = None
-    candidates: List[CandidateResponse] = []
-    candidates_pool: Optional[List[Dict[str, Any]]] = None
-    screening_results: Optional[List[Dict[str, Any]]] = None
     status: InterviewStatus = InterviewStatus.ACTIVE
+    active_question_number: Optional[int] = 1
     created_at: datetime
     updated_at: datetime
     total_questions: int = 0

@@ -1,10 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Loader2, CheckCircle2 } from 'lucide-react';
+import { Send, Bot, User, CheckCircle2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
 import { InterviewSession, ChatMessage } from '@/types';
 import { apiStreamSendMessage } from '@/lib/api';
 import { useLanguage } from '@/hooks/use-language';
@@ -12,12 +11,17 @@ import { useLanguage } from '@/hooks/use-language';
 interface ChatInterfaceProps {
   session: InterviewSession;
   onSessionUpdate: (updated: InterviewSession) => void;
+  isEnding?: boolean;
 }
 
-export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSessionUpdate }) => {
+export const ChatInterface: React.FC<ChatInterfaceProps> = ({
+  session,
+  onSessionUpdate,
+  isEnding = false,
+}) => {
   const [inputText, setInputText] = useState('');
   const [isAiThinking, setIsAiThinking] = useState(false);
-  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [streamError, setStreamError] = useState<string | null>(null);
   const { t } = useLanguage();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -30,13 +34,34 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
     scrollToBottom();
   }, [session.messages]);
 
-  const handleSendMessage = async () => {
-    const text = inputText.trim();
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`;
+    }
+  }, [inputText]);
+
+  useEffect(() => {
+    if (!isAiThinking && session.status !== 'completed') {
+      const timer = setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isAiThinking, session.status]);
+
+  const handleSendMessage = async (overrideText?: string) => {
+    const text = (overrideText !== undefined ? overrideText : inputText).trim();
     if (!text || isAiThinking || session.status === 'completed') return;
 
-    setInputText('');
+    if (overrideText === undefined) {
+      setInputText('');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+    }
+    setStreamError(null);
     setIsAiThinking(true);
-    setStreamingMessageId(null);
 
     const now = new Date().toISOString();
     const userMessage: ChatMessage = {
@@ -50,13 +75,17 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
     let accumulatedText = '';
     let hasStartedStreaming = false;
 
-    // Add ONLY user message initially
-    const messagesWithUser = [...session.messages, userMessage];
-    onSessionUpdate({
-      ...session,
-      messages: messagesWithUser,
-      updatedAt: now,
-    });
+    // Add user message if not retrying an existing message
+    const messagesWithUser =
+      overrideText !== undefined ? session.messages : [...session.messages, userMessage];
+
+    if (overrideText === undefined) {
+      onSessionUpdate({
+        ...session,
+        messages: messagesWithUser,
+        updatedAt: now,
+      });
+    }
 
     try {
       await apiStreamSendMessage(
@@ -67,8 +96,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
 
           if (!hasStartedStreaming) {
             hasStartedStreaming = true;
-            setIsAiThinking(false); // Disappear initial loading indicator
-            setStreamingMessageId(assistantTempId); // Show solving orb to the right of the streaming text
+            setIsAiThinking(false);
           }
 
           const assistantMsg: ChatMessage = {
@@ -85,8 +113,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
           });
         },
         (data) => {
-          setIsAiThinking(false);
-          setStreamingMessageId(null); // Dismiss solving orb once complete
           const finalAssistantMsg: ChatMessage = {
             id: data.messageId || assistantTempId,
             role: 'assistant',
@@ -112,10 +138,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
           }
         }
       );
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error in chat stream:', err);
+      const errMsg =
+        err instanceof Error ? err.message : 'Connection interrupted while waiting for response.';
+      setStreamError(errMsg);
+    } finally {
       setIsAiThinking(false);
-      setStreamingMessageId(null);
     }
   };
 
@@ -133,7 +162,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
         <div className="mx-auto max-w-3xl space-y-4 sm:space-y-6">
           {session.messages.map((msg) => {
             const isAssistant = msg.role === 'assistant';
-            const isCurrentlyStreaming = streamingMessageId === msg.id;
 
             return (
               <div
@@ -157,12 +185,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
                     <span className="text-xs font-semibold text-foreground">
                       {isAssistant ? t.chat.aiTitle : session.candidateName}
                     </span>
-                    {isAssistant && msg.questionNumber && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
-                        {t.chat.questionBadge}
-                        {msg.questionNumber}
-                      </Badge>
-                    )}
                     <span className="text-[10px] text-muted-foreground">
                       {msg.createdAt
                         ? new Date(msg.createdAt).toLocaleTimeString([], {
@@ -183,12 +205,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
                     >
                       {msg.content}
                     </div>
-
-                    {isAssistant && isCurrentlyStreaming && (
-                      <div className="flex shrink-0 items-center justify-center animate-in fade-in duration-200">
-                        <ThinkingOrb state="solving" size={20} />
-                      </div>
-                    )}
                   </div>
                 </div>
 
@@ -208,7 +224,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
                 <Bot className="h-3.5 w-3.5 sm:h-5 sm:w-5" />
               </div>
               <div className="flex items-center gap-2 rounded-2xl rounded-tl-xs bg-primary text-primary-foreground shadow-xs px-3.5 py-2.5 sm:px-4 sm:py-3 text-xs">
-                <ThinkingOrb state="solving" size={20} />
+                <div className="dark:invert">
+                  <ThinkingOrb state="solving" size={20} />
+                </div>
                 <span>{t.chat.thinking}</span>
               </div>
             </div>
@@ -234,33 +252,66 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ session, onSession
       {/* Docked Bottom Input Area */}
       <div className="border-t border-border bg-card/60 p-3 sm:p-4 backdrop-blur">
         <div className="mx-auto max-w-3xl">
-          {session.status === 'completed' ? (
-            <div className="flex items-center justify-center py-2 text-xs text-muted-foreground">
+          {isEnding ? (
+            <div className="flex items-center justify-center gap-2.5 py-3 text-xs text-muted-foreground animate-pulse">
+              <ThinkingOrb state="working" size={20} />
+              <span>
+                {t.header?.endingText || 'Generating final technical evaluation & hiring report...'}
+              </span>
+            </div>
+          ) : session.status === 'completed' ? (
+            <div className="flex items-center justify-center gap-2 py-3 text-xs text-muted-foreground">
+              <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
               <span>{t.chat.concludedText}</span>
             </div>
           ) : (
-            <div className="relative flex items-center">
-              <Textarea
-                ref={textareaRef}
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={t.chat.inputPlaceholder}
-                className="min-h-[48px] h-[48px] sm:min-h-[52px] sm:h-[52px] max-h-32 resize-none pr-12 py-3 sm:py-3.5 text-sm leading-tight"
-                disabled={isAiThinking}
-              />
-              <Button
-                onClick={handleSendMessage}
-                disabled={!inputText.trim() || isAiThinking}
-                size="icon"
-                className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-lg shadow-xs transition-all duration-150 hover:opacity-90 hover:scale-105 active:scale-95 cursor-pointer disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:opacity-40 disabled:opacity-40"
-              >
-                {isAiThinking ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-              </Button>
+            <div className="space-y-2">
+              {streamError && (
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-2.5 px-3 text-xs text-destructive">
+                  <span className="truncate">Connection error: {streamError}</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const lastUserMsg = [...session.messages]
+                        .reverse()
+                        .find((m) => m.role === 'user');
+                      if (lastUserMsg) {
+                        handleSendMessage(lastUserMsg.content);
+                      }
+                    }}
+                    className="h-7 px-2.5 text-xs font-semibold border-destructive/40 hover:bg-destructive/20 text-destructive shrink-0 cursor-pointer"
+                  >
+                    Retry Response
+                  </Button>
+                </div>
+              )}
+              <div className="relative flex items-center">
+                <Textarea
+                  ref={textareaRef}
+                  rows={1}
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={t.chat.inputPlaceholder}
+                  className="min-h-[48px] max-h-44 resize-none pr-12 py-3 sm:py-3.5 text-sm leading-relaxed [scrollbar-width:none] [&::-webkit-scrollbar]:hidden overflow-y-auto bg-background border-border/80 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30 shadow-xs transition-all"
+                  disabled={isAiThinking}
+                  autoFocus
+                />
+                <Button
+                  onClick={() => handleSendMessage()}
+                  disabled={!inputText.trim() || isAiThinking}
+                  size="icon"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 h-8 w-8 rounded-lg shadow-xs transition-all duration-150 hover:opacity-90 hover:scale-105 active:scale-95 cursor-pointer disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:opacity-40 disabled:opacity-40 select-none"
+                >
+                  {isAiThinking ? (
+                    <ThinkingOrb state="working" size={20} />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
             </div>
           )}
         </div>

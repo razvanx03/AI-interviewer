@@ -26,3 +26,15 @@ class BaseLLMProvider(ABC):
     ) -> AsyncGenerator[str, None]:
         """Stream response chunks in real time."""
         pass
+
+    @abstractmethod
+    async def evaluate_interview(
+        self,
+        job_title: str,
+        job_description: str,
+        candidate_name: str,
+        cv_raw_text: str,
+        transcript: List[Dict[str, str]],
+    ) -> Dict[str, Any]:
+        """Produce structured evaluation report for a completed interview."""
+        pass

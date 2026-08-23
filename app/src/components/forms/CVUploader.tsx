@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { UploadCloud, FileText, X, AlertCircle, Users, CheckCircle2, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { useLanguage } from '@/hooks/use-language';
 import { CandidateItem } from '@/types';
 
@@ -9,12 +10,14 @@ interface CVUploaderProps {
   candidates: CandidateItem[];
   onAddFiles: (files: File[]) => void;
   onRemoveCandidate: (index: number) => void;
+  onUpdateCandidateName?: (index: number, name: string) => void;
 }
 
 export const CVUploader: React.FC<CVUploaderProps> = ({
   candidates,
   onAddFiles,
   onRemoveCandidate,
+  onUpdateCandidateName,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -144,7 +147,7 @@ export const CVUploader: React.FC<CVUploaderProps> = ({
             : 'border-border/80 hover:border-primary/50 hover:bg-muted/30'
         }`}
       >
-        <div className="mb-2 flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+        <div className="mb-2 flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-blue-500/15 text-blue-500 dark:text-blue-400 border border-blue-500/30 shadow-2xs">
           <UploadCloud className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
         </div>
         <p className="text-xs sm:text-sm font-medium text-foreground">
@@ -161,10 +164,10 @@ export const CVUploader: React.FC<CVUploaderProps> = ({
         <div className="space-y-2 pt-1">
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-              <Users className="h-3.5 w-3.5 text-primary" />
+              <Users className="h-3.5 w-3.5 text-blue-500 dark:text-blue-400" />
               <span>{t.form.candidatePoolTitle}</span>
             </div>
-            <Badge variant="secondary" className="text-[10px] font-mono h-5 px-1.5">
+            <Badge variant="secondary" className="text-[10px] font-mono h-5 px-1.5 select-none">
               {candidates.length} {t.form.candidateCount}
             </Badge>
           </div>
@@ -173,24 +176,30 @@ export const CVUploader: React.FC<CVUploaderProps> = ({
             {candidates.map((cand, idx) => (
               <div
                 key={cand.id || idx}
-                className="flex items-center justify-between rounded-lg border border-border bg-card/80 p-2.5 px-3 transition-colors hover:border-primary/40 hover:bg-accent/30"
+                className="flex items-center justify-between rounded-lg border border-border bg-card/80 p-2.5 px-3 transition-colors hover:border-primary/40 hover:bg-accent/30 select-none"
               >
                 <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-blue-500/15 text-blue-500 dark:text-blue-400 border border-blue-500/20">
                     <FileText className="h-3.5 w-3.5" />
                   </div>
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex items-center gap-2">
-                      <p className="text-xs font-semibold text-foreground truncate">{cand.name}</p>
+                      <Input
+                        value={cand.name}
+                        onChange={(e) => onUpdateCandidateName?.(idx, e.target.value)}
+                        placeholder="Candidate Name (e.g. Ander Razvan)"
+                        className="h-7 text-xs font-semibold px-2 py-0 bg-background/60 border-border/80 hover:border-primary/50 focus:border-primary focus:bg-background text-foreground rounded-md transition-colors max-w-[240px]"
+                        title="Click to edit candidate name"
+                      />
                       {cand.cvFileName && (
-                        <span className="text-[10px] text-muted-foreground truncate hidden sm:inline">
+                        <span className="text-[10px] text-muted-foreground truncate hidden md:inline shrink-0">
                           ({cand.cvFileName})
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 text-[10px] text-muted-foreground truncate">
+                    <div className="flex items-center gap-1.5 px-0.5 text-[10px] text-muted-foreground truncate">
                       <CheckCircle2 className="h-2.5 w-2.5 text-emerald-500 shrink-0" />
-                      <span className="truncate">
+                      <span className="truncate font-mono">
                         {cand.fileSizeFormatted ||
                           (cand.cvRawText
                             ? `${Math.round(cand.cvRawText.length / 100)} KB text`
@@ -209,7 +218,7 @@ export const CVUploader: React.FC<CVUploaderProps> = ({
                       e.stopPropagation();
                       handleDownload(cand);
                     }}
-                    className="h-7 w-7 shrink-0 text-muted-foreground hover:text-primary hover:bg-primary/10 cursor-pointer"
+                    className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
                     title="Download CV"
                   >
                     <Download className="h-3.5 w-3.5" />

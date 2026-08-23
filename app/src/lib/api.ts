@@ -95,29 +95,6 @@ export async function apiListInterviews(ids?: string[]): Promise<InterviewSessio
       experienceLevel: data.experience_level,
       candidateName: data.candidate_name,
       cvFileName: data.cv_filename || undefined,
-      cvRawText: data.cv_raw_text || undefined,
-      candidatesPool:
-        data.candidates?.map((c) => ({
-          name: c.name,
-          cvFileName: c.cv_filename || undefined,
-          cvRawText: c.cv_raw_text || undefined,
-        })) ||
-        data.candidates_pool?.map((c) => ({
-          name: c.name,
-          cvFileName: c.cv_filename,
-          cvRawText: c.cv_raw_text,
-        })),
-      screeningResults:
-        data.candidates?.map((c) => ({
-          name: c.name,
-          match_score: c.match_score ?? 0,
-          strengths: c.strengths || [],
-          summary: c.summary || '',
-          is_selected: c.is_selected,
-          cv_filename: c.cv_filename || undefined,
-        })) ||
-        data.screening_results ||
-        undefined,
       status: data.status,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
@@ -222,29 +199,6 @@ export async function apiGetInterview(id: string): Promise<InterviewSession | nu
       experienceLevel: data.experience_level,
       candidateName: data.candidate_name,
       cvFileName: data.cv_filename || undefined,
-      cvRawText: data.cv_raw_text || undefined,
-      candidatesPool:
-        data.candidates?.map((c) => ({
-          name: c.name,
-          cvFileName: c.cv_filename || undefined,
-          cvRawText: c.cv_raw_text || undefined,
-        })) ||
-        data.candidates_pool?.map((c) => ({
-          name: c.name,
-          cvFileName: c.cv_filename,
-          cvRawText: c.cv_raw_text,
-        })),
-      screeningResults:
-        data.candidates?.map((c) => ({
-          name: c.name,
-          match_score: c.match_score ?? 0,
-          strengths: c.strengths || [],
-          summary: c.summary || '',
-          is_selected: c.is_selected,
-          cv_filename: c.cv_filename || undefined,
-        })) ||
-        data.screening_results ||
-        undefined,
       status: data.status,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
@@ -330,9 +284,9 @@ export async function apiStreamSendMessage(
           if (payload.chunk) {
             onChunk(payload.chunk);
           }
-          if (payload.done) {
+          if (payload.done || payload.message_id !== undefined) {
             onComplete({
-              isComplete: payload.is_complete,
+              isComplete: Boolean(payload.is_complete),
               questionNumber: payload.question_number,
               messageId: payload.message_id,
             });

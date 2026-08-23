@@ -1,6 +1,6 @@
 import datetime
 from typing import List, Optional, TYPE_CHECKING
-from sqlalchemy import String, Text, DateTime, Enum as SAEnum
+from sqlalchemy import String, Text, DateTime, Enum as SAEnum, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from db.base import Base
 from schemas.interview import ExperienceLevel, InterviewStatus
@@ -44,6 +44,13 @@ class Interview(Base):
         default=InterviewStatus.ACTIVE,
         nullable=False,
     )
+
+    # Conversational State & Topic Tracking
+    active_question_number: Mapped[Optional[int]] = mapped_column(nullable=True, default=1)
+    consecutive_clarifications: Mapped[int] = mapped_column(nullable=False, default=0)
+    topics_plan: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True, default=list)
+    current_topic_index: Mapped[int] = mapped_column(nullable=False, default=0)
+    topic_follow_up_count: Mapped[int] = mapped_column(nullable=False, default=0)
 
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.timezone.utc)
