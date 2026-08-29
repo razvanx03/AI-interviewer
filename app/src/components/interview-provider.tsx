@@ -1,32 +1,50 @@
-import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
 import { InterviewSession } from '@/types';
 import { apiListInterviews, apiDeleteInterview } from '@/lib/api';
 import { getStoredInterviewIds, saveInterviewId, removeInterviewId } from '@/lib/storage';
 import { InterviewContext } from '@/context/interview-context';
+import { useAdminAuth } from '@/hooks/use-admin-auth';
 
 export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAdmin, isLoading: isAuthLoading } = useAdminAuth();
   const [interviews, setInterviews] = useState<InterviewSession[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const refreshInterviews = useCallback(async () => {
-    const storedIds = getStoredInterviewIds();
+    if (isAuthLoading) return;
 
-    if (storedIds.length === 0) {
-      setInterviews([]);
-      setIsLoading(false);
+    if (!isAdmin) {
+      const storedIds = getStoredInterviewIds();
+      if (storedIds.length === 0) {
+        setInterviews([]);
+        setIsLoading(false);
+        return;
+      }
+      try {
+        const apiSessions = await apiListInterviews(storedIds);
+        apiSessions.sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        setInterviews(apiSessions);
+      } catch (err) {
+        console.warn('Failed to load interviews from API:', err);
+      } finally {
+        setIsLoading(false);
+      }
       return;
     }
 
+    // When Admin is authenticated: Fetch ALL interview sessions from database
     try {
-      const apiSessions = await apiListInterviews(storedIds);
+      const apiSessions = await apiListInterviews();
       apiSessions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setInterviews(apiSessions);
     } catch (err) {
-      console.warn('Failed to load interviews from API:', err);
+      console.warn('Failed to load full admin interview history:', err);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isAdmin, isAuthLoading]);
 
   useEffect(() => {
     refreshInterviews();

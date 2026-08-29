@@ -114,7 +114,7 @@ export const SettingsMenu: React.FC = () => {
               className="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium cursor-pointer"
             >
               <span className="flex items-center gap-2">
-                <span className="text-sm">🇬🇧</span>
+                <span className="font-semibold text-[11px] text-muted-foreground w-4">EN</span>
                 {t.settings.langEn}
               </span>
               {language === 'en' && <Check className="h-3.5 w-3.5 text-primary" />}
@@ -128,7 +128,7 @@ export const SettingsMenu: React.FC = () => {
               className="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium cursor-pointer"
             >
               <span className="flex items-center gap-2">
-                <span className="text-sm">🇷🇴</span>
+                <span className="font-semibold text-[11px] text-muted-foreground w-4">RO</span>
                 {t.settings.langRo}
               </span>
               {language === 'ro' && <Check className="h-3.5 w-3.5 text-primary" />}

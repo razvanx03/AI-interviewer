@@ -48,6 +48,14 @@ export interface InterviewSession {
   candidatesPool?: CandidateItem[];
   screeningResults?: CandidateScreeningResult[];
   status: InterviewStatus;
+  activeQuestionNumber?: number | null;
+  activeQuestionText?: string | null;
+  activeQuestionStatus?: string;
+  topicsPlan?: string[];
+  assessedTopics?: string[];
+  timeLimitMinutes?: number | null;
+  language?: string;
+  conversationSummary?: string;
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];
@@ -64,4 +72,6 @@ export interface CreateInterviewInput {
   cvFile?: File | null;
   cvFileName?: string;
   cvRawText?: string;
+  timeLimitMinutes?: number | null;
+  language?: string;
 }

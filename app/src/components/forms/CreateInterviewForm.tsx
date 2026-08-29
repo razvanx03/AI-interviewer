@@ -17,6 +17,8 @@ import {
   ExternalLink,
   FileText,
   GripVertical,
+  Timer,
+  Globe,
 } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -41,7 +43,7 @@ import {
   InterviewSession,
   CandidateScreeningResult,
 } from '@/types';
-import { apiScreenCandidates } from '@/lib/api';
+import { apiScreenCandidates, apiExtractDocuments } from '@/lib/api';
 
 interface CreateInterviewFormProps {
   onCreateSession: (data: CreateInterviewInput) => Promise<InterviewSession>;
@@ -68,6 +70,16 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
   const [screeningResults, setScreeningResults] = useState<CandidateScreeningResult[]>([]);
   const [topCandidate, setTopCandidate] = useState<CandidateScreeningResult | null>(null);
   const [createdSession, setCreatedSession] = useState<InterviewSession | null>(null);
+
+  // Step 3 Timer state: optional countdown timer in minutes
+  const [enableTimer, setEnableTimer] = useState<boolean>(false);
+  const [timerMinutes, setTimerMinutes] = useState<number>(15);
+
+  // Step 3 Spoken Language state: strictly locked to 'en' or 'ro'
+  const [interviewLanguage, setInterviewLanguage] = useState<'en' | 'ro'>('en');
+
+  // Step 3 Document Viewer Tab state: 'pdf' (Interactive PDF) or 'text' (AI Extracted Text)
+  const [activeDocViewTab, setActiveDocViewTab] = useState<'pdf' | 'text'>('pdf');
 
   // Step 3 Resizable Splitter state (50/50 default balance)
   const [splitRatio, setSplitRatio] = useState<number>(50); // 50% left, 50% right
@@ -145,7 +157,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
         ? 3
         : 1;
 
-  const handleAddFiles = (files: File[]) => {
+  const handleAddFiles = async (files: File[]) => {
     setFormError(null);
     const newItems: CandidateItem[] = files.map((file) => {
       const cleanName = file.name
@@ -170,11 +182,39 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
         cvFileName: file.name,
         file,
         fileSizeFormatted: sizeFormatted,
-        cvRawText: `Candidate ${formattedName} resume file ${file.name}`,
+        cvRawText: '',
       };
     });
 
     setCandidates((prev) => [...prev, ...newItems]);
+
+    // Asynchronously extract real document text and actual candidate names from files
+    try {
+      const res = await apiExtractDocuments(files);
+      if (res?.candidates && res.candidates.length > 0) {
+        setCandidates((prev) =>
+          prev.map((c) => {
+            const extracted = res.candidates.find(
+              (item) => item.filename.toLowerCase() === (c.cvFileName || '').toLowerCase()
+            );
+            if (extracted) {
+              const realName =
+                (c.name === 'Candidate' || !c.name.trim()) && extracted.extracted_name
+                  ? extracted.extracted_name
+                  : c.name;
+              return {
+                ...c,
+                name: realName,
+                cvRawText: extracted.raw_text,
+              };
+            }
+            return c;
+          })
+        );
+      }
+    } catch (err) {
+      console.warn('Real-time document text extraction warning:', err);
+    }
   };
 
   const handleRemoveCandidate = (index: number) => {
@@ -215,6 +255,24 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
       });
       setTopCandidate(res.top_candidate);
       setScreeningResults(res.screening_results);
+
+      // Sync names and raw text back to candidates state
+      setCandidates((prev) =>
+        prev.map((c) => {
+          const match = res.screening_results.find(
+            (r) => r.cv_filename === c.cvFileName || r.name.toLowerCase() === c.name.toLowerCase()
+          );
+          if (match) {
+            return {
+              ...c,
+              name: match.name,
+              cvRawText: match.cv_raw_text || c.cvRawText,
+            };
+          }
+          return c;
+        })
+      );
+
       setCreatedSession(null);
       goToStep(3);
     } catch (err) {
@@ -245,11 +303,24 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
     const orderedCandidates = [...candidates];
     if (activeWinner) {
       const matchIdx = orderedCandidates.findIndex(
-        (c) => c.name.toLowerCase() === activeWinner.name.toLowerCase()
+        (c) =>
+          c.name.toLowerCase() === activeWinner.name.toLowerCase() ||
+          c.cvFileName === activeWinner.cv_filename
       );
-      if (matchIdx > 0) {
+      if (matchIdx >= 0) {
         const [winner] = orderedCandidates.splice(matchIdx, 1);
-        orderedCandidates.unshift(winner);
+        orderedCandidates.unshift({
+          ...winner,
+          name: activeWinner.name,
+          cvRawText: activeWinner.cv_raw_text || winner.cvRawText,
+        });
+      } else {
+        orderedCandidates.unshift({
+          id: Math.random().toString(36).substring(2, 9),
+          name: activeWinner.name,
+          cvFileName: activeWinner.cv_filename,
+          cvRawText: activeWinner.cv_raw_text,
+        });
       }
     }
 
@@ -258,21 +329,31 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
       companyName: companyName.trim() || undefined,
       jobDescription: jobDescription.trim(),
       experienceLevel,
+      candidateName: activeWinner ? activeWinner.name : undefined,
+      timeLimitMinutes: enableTimer ? timerMinutes : undefined,
+      language: interviewLanguage,
       candidates: orderedCandidates,
     });
     setCreatedSession(session);
     return session;
   };
 
-  const handleStartLiveInterview = async () => {
+  const handleGenerateSession = async () => {
     if (isStarting || isCopying || isLoading) return;
     setIsStarting(true);
     setFormError(null);
     try {
       const session = await getOrCreateSession();
-      onStartInterview(session);
+      const inviteUrl = `${window.location.origin}/interview/${session.id}`;
+      try {
+        await navigator.clipboard.writeText(inviteUrl);
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2500);
+      } catch {
+        // clipboard auto-copy might fail if window not active
+      }
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Failed to start interview.');
+      setFormError(err instanceof Error ? err.message : 'Failed to generate interview.');
     } finally {
       setIsStarting(false);
     }
@@ -289,7 +370,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), 2500);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Failed to generate invite link.');
+      setFormError(err instanceof Error ? err.message : 'Failed to copy invite link.');
     } finally {
       setIsCopying(false);
     }
@@ -297,17 +378,38 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
 
   const fillSampleJob = () => {
     setFormError(null);
-    setJobTitle('Senior Full Stack Engineer');
-    setCompanyName('Google');
-    setExperienceLevel('senior');
+    setJobTitle('Backend Developer');
+    setCompanyName('Agile Freaks');
+    setExperienceLevel('mid');
     setJobDescription(
-      'We are looking for a Senior Full Stack Engineer to lead architecture for our scalable web applications.\n\n' +
-        'Core Requirements:\n' +
-        '- 5+ years building modern React, TypeScript, and Node.js applications.\n' +
-        '- Strong experience with Python (FastAPI/Django) and REST/GraphQL APIs.\n' +
-        '- Expertise in PostgreSQL database optimization, indexing, and pgvector embeddings.\n' +
-        '- Proficiency in Docker containerization and CI/CD pipelines.\n' +
-        '- Strong architectural decision-making and pair programming communication.'
+      'About the role:\n\n' +
+        'As a backend developer, you will contribute to designing, implementing and operating a system that supports the product requested features.\n\n' +
+        'We work with: Ruby on Rails, Dry-Rb, Sidekiq, Shoryuken, RSpec/minitest, AWS (S3/SQS/RDS/EKS, etc), Redis, Datadog\n\n' +
+        'This is what we need from you:\n' +
+        '- Experience with Ruby on Rails or another backend language and willingness to learn Rails\n' +
+        '- Technical background (e.g., degree in Computer Science or equivalent experience)\n' +
+        '- Understanding of the HTTP protocol\n' +
+        '- Basic Git knowledge\n' +
+        '- Knowledge of design patterns and SOLID principles\n' +
+        '- Experience building APIs with GraphQL\n' +
+        '- Experience with Event Sourcing\n' +
+        '- Experience with Domain-Driven Design (DDD)\n' +
+        '- Experience working in an agile environment\n' +
+        '- Excellent communication skills in written and spoken English\n\n' +
+        'What we offer:\n' +
+        '- Collaboration type: CIM\n' +
+        '- Fully remote option (based on experience level)\n' +
+        '- We hide nothing! Full disclosure on company information\n' +
+        '- Profit Sharing - we share all registered profit between the freaks, based on seniority and level of experience\n' +
+        '- Craft Budget (personal budget to improve your craft, buy anything you need, software, hardware, books, conference tickets and such): $2500/year/person\n' +
+        '- Access to our startup fund ($120,000) to implement your personal project\n' +
+        '- Flexible working hours\n' +
+        '- Holiday Bonus (1 salary/year)\n' +
+        "- Mold your workplace through AFIP (Agile Freaks Improvement Process). Curious about AFIP? It's the best thing to make yourself heard\n\n" +
+        'Salary range:\n' +
+        'Brut: 16735 lei - 23600 lei\n\n' +
+        'Applicants must be permanent residents in Romania or moving here from an EU country!\n\n' +
+        'Locations: Sibiu (Fully Remote)'
     );
   };
 
@@ -901,15 +1003,123 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                     </div>
                   )}
 
+                  {/* Interview Time Limit (Countdown Timer) */}
+                  <div className="rounded-xl border border-border/80 bg-muted/20 p-3.5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Timer className="h-4 w-4 text-primary" />
+                        <div>
+                          <div className="text-xs font-semibold text-foreground select-none">
+                            Time Limit (Countdown Timer)
+                          </div>
+                          <p className="text-[10px] text-muted-foreground select-none">
+                            {enableTimer
+                              ? `Paced technical evaluation (${timerMinutes} min)`
+                              : 'Untimed session (unconstrained duration)'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={enableTimer}
+                          onClick={() => {
+                            setEnableTimer((prev) => !prev);
+                            setCreatedSession(null);
+                          }}
+                          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                            enableTimer ? 'bg-primary' : 'bg-muted-foreground/30'
+                          }`}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-background shadow-lg ring-0 transition duration-200 ease-in-out ${
+                              enableTimer ? 'translate-x-4' : 'translate-x-0'
+                            }`}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    {enableTimer && (
+                      <div className="flex items-center justify-between gap-3 pt-2 border-t border-border/40">
+                        <span className="text-xs text-muted-foreground select-none">
+                          Allocated Duration:
+                        </span>
+                        <Select
+                          value={String(timerMinutes)}
+                          onValueChange={(val) => {
+                            setTimerMinutes(Number(val));
+                            setCreatedSession(null);
+                          }}
+                        >
+                          <SelectTrigger className="w-[145px] h-8 text-xs font-medium bg-background border-border">
+                            <SelectValue placeholder="Select duration" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="10">10 minutes</SelectItem>
+                            <SelectItem value="15">15 minutes</SelectItem>
+                            <SelectItem value="20">20 minutes</SelectItem>
+                            <SelectItem value="25">25 minutes</SelectItem>
+                            <SelectItem value="30">30 minutes</SelectItem>
+                            <SelectItem value="40">40 minutes</SelectItem>
+                            <SelectItem value="60">60 minutes</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Interview Spoken Language */}
+                  <div className="rounded-xl border border-border/80 bg-muted/20 p-3.5 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Globe className="h-4 w-4 text-primary" />
+                        <div>
+                          <div className="text-xs font-semibold text-foreground select-none">
+                            {t.form.interviewLanguageLabel}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground select-none">
+                            {interviewLanguage === 'ro'
+                              ? 'Interviul se va desfășura 100% în limba Română'
+                              : 'The interview will be conducted 100% in English'}
+                          </p>
+                        </div>
+                      </div>
+                      <Select
+                        value={interviewLanguage}
+                        onValueChange={(val: 'en' | 'ro') => {
+                          setInterviewLanguage(val);
+                          setCreatedSession(null);
+                        }}
+                      >
+                        <SelectTrigger className="w-[145px] h-8 text-xs font-medium bg-background border-border">
+                          <SelectValue placeholder="Select language" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="en">English (EN)</SelectItem>
+                          <SelectItem value="ro">Română (RO)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
                   {/* Direct Invite Link */}
                   <div className="rounded-xl border border-border/80 bg-muted/20 p-3.5 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold text-foreground select-none">
                         Direct Invite Link
                       </span>
-                      <span className="text-[10px] text-muted-foreground select-none">
-                        Share with candidate
-                      </span>
+                      {createdSession ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-500 select-none">
+                          <CheckCircle2 className="h-3 w-3" />
+                          Ready to share
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground select-none">
+                          Share with candidate
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Input
@@ -917,16 +1127,20 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                         value={
                           createdSession
                             ? `${window.location.origin}/interview/${createdSession.id}`
-                            : `${window.location.origin}/interview/invite-link`
+                            : 'Click "Generate Invitation Link" below to initialize session'
                         }
-                        className="h-8.5 text-xs font-mono bg-background text-muted-foreground select-all"
+                        className={`h-8.5 text-xs font-mono select-all ${
+                          createdSession
+                            ? 'bg-background text-foreground font-semibold border-emerald-500/40'
+                            : 'bg-muted/40 text-muted-foreground italic'
+                        }`}
                       />
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         onClick={handleCopyLink}
-                        disabled={isCopying || isStarting || isLoading}
+                        disabled={!createdSession || isCopying || isStarting || isLoading}
                         className="h-8.5 px-3 gap-1.5 text-xs shrink-0 cursor-pointer shadow-2xs min-w-[70px] select-none"
                       >
                         {isCopying ? (
@@ -963,25 +1177,59 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                     <span>{t.form.reviseCandidates}</span>
                   </Button>
 
-                  <Button
-                    type="button"
-                    onClick={handleStartLiveInterview}
-                    disabled={isStarting || isCopying || isLoading}
-                    size="lg"
-                    className="w-full sm:flex-1 gap-2 text-sm sm:text-base font-semibold h-11 sm:h-12 cursor-pointer shadow-sm select-none"
-                  >
-                    {isStarting ? (
-                      <div className="flex items-center gap-2">
-                        <ThinkingOrb state="working" size={20} />
-                        <span>{t.form.generatingButton}</span>
-                      </div>
-                    ) : (
-                      <>
-                        <span>{t.form.startInterviewNow}</span>
-                        <ExternalLink className="h-4 w-4" />
-                      </>
-                    )}
-                  </Button>
+                  {!createdSession ? (
+                    <Button
+                      type="button"
+                      onClick={handleGenerateSession}
+                      disabled={isStarting || isCopying || isLoading}
+                      size="lg"
+                      className="w-full sm:flex-1 gap-2 text-sm font-semibold h-10 sm:h-11 cursor-pointer shadow-sm select-none"
+                    >
+                      {isStarting ? (
+                        <div className="flex items-center gap-2">
+                          <ThinkingOrb state="working" size={20} />
+                          <span>Preparing AI Context & Link...</span>
+                        </div>
+                      ) : (
+                        <>
+                          <Sparkles className="h-4 w-4" />
+                          <span>Generate Invitation Link</span>
+                        </>
+                      )}
+                    </Button>
+                  ) : (
+                    <div className="flex items-center gap-2 w-full sm:flex-1">
+                      <Button
+                        type="button"
+                        onClick={handleCopyLink}
+                        size="lg"
+                        className="flex-1 gap-2 text-sm font-semibold h-10 sm:h-11 cursor-pointer shadow-sm select-none"
+                      >
+                        {isCopied ? (
+                          <>
+                            <Check className="h-4 w-4 text-emerald-300" />
+                            <span>Link Copied to Clipboard!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-4 w-4" />
+                            <span>Copy Candidate Invite Link</span>
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => onStartInterview(createdSession)}
+                        size="lg"
+                        className="h-10 sm:h-11 px-3 text-xs gap-1.5 cursor-pointer shadow-2xs select-none"
+                        title="Observe Live Room as Admin (Read Only)"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Observe Room</span>
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -1030,7 +1278,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                 <div className="absolute inset-0 z-30 bg-transparent cursor-col-resize select-none" />
               )}
               {/* Document Header Ribbon */}
-              <div className="flex items-center justify-between p-3.5 px-4 border-b border-border/80 bg-muted/40 shrink-0">
+              <div className="flex items-center justify-between p-3 sm:p-3.5 px-4 border-b border-border/80 bg-muted/40 shrink-0 gap-2 flex-wrap">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/15 text-blue-400 border border-blue-500/30">
                     <FileText className="h-4 w-4" />
@@ -1041,28 +1289,58 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                         `${activeTopCandidate.name} - Candidate Resume`}
                     </h4>
                     <p className="text-[10px] text-muted-foreground truncate">
-                      {activePdfUrl ? 'Live Interactive PDF Document' : 'Parsed Resume Profile'}
+                      {activePdfUrl ? 'Live Document & AI Ingestion' : 'Parsed Resume Profile'}
                     </p>
                   </div>
                 </div>
 
-                {activePdfUrl && (
-                  <a
-                    href={activePdfUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-500 hover:text-blue-400 hover:underline px-2.5 py-1.5 rounded-md hover:bg-blue-500/10 transition-colors cursor-pointer select-none"
-                    title="Open in full browser tab"
-                  >
-                    <span>Full Tab</span>
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </a>
-                )}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {/* Toggle between PDF & AI Extracted Text */}
+                  {activePdfUrl && (
+                    <div className="flex items-center rounded-lg border border-border bg-background/80 p-0.5 text-xs font-medium">
+                      <button
+                        type="button"
+                        onClick={() => setActiveDocViewTab('pdf')}
+                        className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer select-none text-xs ${
+                          activeDocViewTab === 'pdf'
+                            ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        PDF View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveDocViewTab('text')}
+                        className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer select-none text-xs ${
+                          activeDocViewTab === 'text'
+                            ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        AI Extracted Text
+                      </button>
+                    </div>
+                  )}
+
+                  {activePdfUrl && (
+                    <a
+                      href={activePdfUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-blue-500 hover:text-blue-400 hover:underline px-2 py-1 rounded-md hover:bg-blue-500/10 transition-colors cursor-pointer select-none"
+                      title="Open in full browser tab"
+                    >
+                      <span>Full Tab</span>
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                </div>
               </div>
 
               {/* Document Reader Frame */}
               <div className="flex-1 overflow-hidden bg-zinc-950/20">
-                {activePdfUrl ? (
+                {activePdfUrl && activeDocViewTab === 'pdf' ? (
                   <iframe
                     src={`${activePdfUrl}#navpanes=0&pagemode=none&toolbar=1&view=FitH`}
                     title={`${activeTopCandidate.name} CV Document`}
@@ -1072,9 +1350,14 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                   <div className="p-5 sm:p-6 h-full overflow-y-auto space-y-5 select-text text-card-foreground">
                     <div className="border-b border-border/60 pb-4 flex items-start justify-between gap-3">
                       <div>
-                        <h3 className="text-lg font-bold text-foreground">
-                          {activeTopCandidate.name}
-                        </h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-lg font-bold text-foreground">
+                            {activeTopCandidate.name}
+                          </h3>
+                          <Badge className="bg-primary/20 text-primary border-primary/30 text-[10px] font-mono">
+                            AI Extracted Profile
+                          </Badge>
+                        </div>
                         <p className="text-xs text-muted-foreground mt-0.5">
                           {jobTitle} • {companyName || 'Technical Applicant Profile'}
                         </p>
@@ -1097,11 +1380,19 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                     </div>
 
                     <div className="space-y-2 pt-1">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        Extracted Resume Content
-                      </span>
-                      <div className="rounded-lg bg-muted/40 p-4 text-xs text-foreground leading-relaxed whitespace-pre-wrap font-sans border border-border/60 shadow-inner">
-                        {activeTopCandidate.cv_raw_text || 'No raw text available.'}
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          Exact Extracted Resume Text (Ingested by AI)
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {activeTopCandidate.cv_raw_text
+                            ? `${activeTopCandidate.cv_raw_text.length} characters extracted`
+                            : '0 characters'}
+                        </span>
+                      </div>
+                      <div className="rounded-lg bg-muted/40 p-4 text-xs text-foreground leading-relaxed whitespace-pre-wrap font-mono border border-border/60 shadow-inner max-h-[500px] overflow-y-auto">
+                        {activeTopCandidate.cv_raw_text ||
+                          'No raw text extracted for this profile.'}
                       </div>
                     </div>
                   </div>

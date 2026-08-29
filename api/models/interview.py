@@ -46,11 +46,17 @@ class Interview(Base):
     )
 
     # Conversational State & Topic Tracking
-    active_question_number: Mapped[Optional[int]] = mapped_column(nullable=True, default=1)
+    active_question_number: Mapped[Optional[int]] = mapped_column(nullable=True, default=None)
+    active_question_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
+    active_question_status: Mapped[str] = mapped_column(String(30), default="INTRO", nullable=False)
     consecutive_clarifications: Mapped[int] = mapped_column(nullable=False, default=0)
     topics_plan: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True, default=list)
+    assessed_topics: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True, default=list)
     current_topic_index: Mapped[int] = mapped_column(nullable=False, default=0)
     topic_follow_up_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    time_limit_minutes: Mapped[Optional[int]] = mapped_column(nullable=True, default=None)
+    language: Mapped[str] = mapped_column(String(10), default="en", nullable=False)
+    conversation_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
 
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.datetime.now(datetime.timezone.utc)

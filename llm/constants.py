@@ -37,3 +37,13 @@ HTTP_CONNECT_TIMEOUT_SECONDS: float = 10.0
 HTTP_READ_TIMEOUT_SECONDS: float = 180.0
 HTTP_WRITE_TIMEOUT_SECONDS: float = 30.0
 HTTP_POOL_TIMEOUT_SECONDS: float = 30.0
+
+# ==============================================================================
+# Context Window Management & Progressive Summarization Constants
+# ==============================================================================
+DEFAULT_NUM_CTX: int = 8192
+CONTEXT_TOKEN_THRESHOLD_RATIO: float = 0.60
+RECENT_MESSAGES_WINDOW_COUNT: int = 6
+EVALUATION_CHUNK_SIZE_ROUNDS: int = 4
+EVALUATION_CHUNK_TRIGGER_ROUNDS: int = 5
+

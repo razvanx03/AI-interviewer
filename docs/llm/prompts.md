@@ -1,34 +1,51 @@
 # Prompt Engineering (`llm/prompts.py`)
 
-Defines system prompt templates, dynamic prompt builders, intent classifications, and completion protocols for the technical interview lifecycle.
+Defines modular system prompt templates, dynamic prompt builders, intent classifications, and completion protocols optimized for local LLMs (Qwen 3.5 8B) under deterministic backend state machine orchestration.
 
 ---
 
 ## 1. `build_system_interviewer_prompt`
 
 Assembles the real-time system prompt defining the AI Interviewer persona and dynamic state machine rules:
-- **Inputs**: `job_title`, `job_description`, `experience_level`, `cv_raw_text`, `candidate_name`, `active_question_number`, `consecutive_clarifications`, `clarification_threshold`.
-- **Assessment Checklist**: Mandates probing 5 key competency areas (Core Language/Framework, Architecture & Scalability, Database Performance, CV Project Deep-Dives, Problem-Solving & Edge Cases).
-- **Conversational Protocol & Intent Handling**:
-  - `[ANSWER]`: Candidate answered the active question $\rightarrow$ Evaluate depth and transition to the next checklist topic.
-  - `[I DON'T KNOW / SKIP]`: Candidate indicates lack of knowledge or passes $\rightarrow$ Acknowledge politely without condescension and immediately pivot to a fresh checklist competency (e.g. Database Engineering, Query Performance) without repeating questions.
-  - `[QUESTION / CLARIFICATION]`: Candidate asked for details $\rightarrow$ Answer concisely (1-2 sentences) and immediately re-steer back to the active problem without advancing question count.
-  - `[BOTH]`: Address clarification and evaluate provided partial answer.
-- **Anti-Repetition Directive**: Strict prohibition against repeating previous questions, scenarios, or robotic boilerplate phrases.
-- **Autonomous Completion Protocol**: Emits `[INTERVIEW_COMPLETE]` once checklist competencies have sufficient evaluation evidence.
-- **Multilingual & Dynamic Language Adaptability**: Continuously monitors the language used by the candidate (e.g. Romanian, English, French, Spanish, German). If the candidate speaks or switches to another language, the interviewer immediately mirrors that language for all subsequent dialogue while preserving standard software engineering terminology in English.
-- **Dynamic Steering Directive**: Injected if consecutive candidate counter-questions exceed the steering threshold (3), prompting a firm but polite return to the active question.
+- **Inputs**: `job_title`, `job_description`, `experience_level`, `company_name`, `cv_raw_text`, `candidate_name`, `target_language`, `conversation_summary`.
+- **Seniority Rubrics**: Injects tailored focus and standards (`entry`, `mid`, `senior`, `lead`, `executive`).
+- **Strict Single Question Principle**: Enforces strictly ONE technical question per turn without headers or bulleted lists.
+- **Tone & Pronouns (Persoana a II-a Singular - Collegial & Respectful)**:
+  - Adresează-te mereu la **persoana a II-a singular** (*„tu”*, *„cum ai gestiona”*, *„ce ai alege”*, *„spune-mi”*).
+  - Interzice strict formele de politețe plural (*„dumneavoastră”*, *„vă rugăm”*, *„ați înțeles”*) și formele de persoana a III-a (*„ar lua”*).
+- **Language Directives**: Full Romanian (`ro`) or English (`en`) mirroring while preserving technical terms (Docker, Redis, React, FastAPI, hook, state, etc.).
+- **Prior Conversation Summary**: Injects dense progressive summaries of older rounds when context window threshold is reached.
 
 ---
 
-## 2. `build_intro_question_prompt`
+## 2. Dynamic Turn Prompt Builders
 
-Generates the initial greeting and opening technical question tailored to the candidate's CV highlights when the interview session is created.
+### `build_intro_prompt`
+- **Step 1 of Two-Step Intro**: Generates a warm, professional greeting and format overview, asking the candidate if they are ready to begin without asking technical questions yet.
+
+### `build_first_question_prompt`
+- **Step 2 of Two-Step Intro**: Acknowledges candidate readiness and poses Question 1 exploring the first core competency extracted from the Job Description.
+
+### `build_clarification_response_prompt`
+- Explains the requested term, concept, or constraint concisely (1-2 sentences) and smoothly returns to the **active question** (`active_question_text`).
+- If `consecutive_clarifications >= 3`, politely states that candidate's technical problem-solving reasoning is needed to evaluate the role.
+
+### `build_both_response_prompt`
+- Addresses candidate's clarifying question briefly, acknowledges their partial answer, and asks the next question on `next_topic`.
+
+### `build_refusal_response_prompt`
+- Acknowledges supportively in 1 sentence when a candidate says "I don't know / haven't worked with this / skip", and transitions to `next_topic`.
+
+### `build_next_question_prompt`
+- Acknowledges candidate's answer and asks the next question on `next_topic` or emits `[INTERVIEW_COMPLETE]` if wrapping up.
 
 ---
 
-## 3. `build_evaluation_report_prompt`
+## 3. Evaluation and Extraction Builders
 
-Formats the entire completed interview transcript with candidate CV and job requirements to generate a structured JSON evaluation report (`technical_score`, `communication_score`, `experience_score`, `overall_score`, `recommendation`, `strengths`, `weaknesses`, `summary`).
-- **Scoring Rubric & Grading Scale**: 1.0 - 10.0 scale with penalties for evasiveness/premature exit.
-- **Retroactive / Delayed Answers Protocol**: If the candidate skipped a question initially but later returned with a valid technical explanation, partial credit (60-75%) is awarded to recognize their ultimate understanding while factoring in the delay.
+- **`build_extract_topics_prompt`**: Extracts 4-6 realistic, core technical competencies directly from the Job Description and seniority level.
+- **`build_screening_prompt`**: Scores and ranks multi-candidate CV pools against Job Description.
+- **`build_conversation_summary_prompt`**: Generates dense progressive summaries for context window management.
+- **`build_chunk_evaluation_prompt` & `build_final_evaluation_aggregation_prompt`**: Map-Reduce chunked evaluation for long sessions.
+- **`build_evaluation_report_prompt`**: Fair single-pass evaluation distinguishing clarifications, language switches, refusals, and substantive answers.
+

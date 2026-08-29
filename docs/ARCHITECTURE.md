@@ -45,19 +45,25 @@ The **AI-Powered Job Interviewer** is a modern, privacy-centric platform designe
 
 - **Framework**: React 18 + Vite + TypeScript.
 - **Routing**: `react-router-dom` declarative page routes:
-  - `/` -> `HomePage` (New Interview Configuration Wizard & Multi-Candidate Pool)
-  - `/interview/:id` -> `InterviewRoomPage` (Real-time AI Chat stream & Transcript)
+  - `/login` -> `LoginPage` (Admin Recruiter JWT Authentication)
+  - `/` -> `HomePage` (Protected Admin Dashboard, New Interview Wizard & Multi-Candidate Pool)
+  - `/interview/:id` -> `InterviewRoomPage` (Role-aware AI Chat stream, Transcript, & Dual Evaluation View)
   - `*` -> `NotFoundPage` (404 Screen)
-- **Layout**: `AppLayout` rendering persistent `Sidebar` and dynamic `Outlet`.
+- **Layout**: `AppLayout` rendering persistent role-aware `Sidebar` and dynamic `Outlet`.
 - **UI Components**: Strict shadcn/ui components (`Button`, `Card`, `Dialog`, `Input`, `Textarea`, `Badge`, `Select`, `Separator`).
-- **Screening & Wizard**: 3-Step Setup Wizard (Role Details -> Multi-CV Candidate Pool -> AI Winner Selection & Candidate Invite Link).
+- **Screening & Wizard**: 3-Step Setup Wizard (Role Details -> Multi-CV Candidate Pool -> Winner Selection & Invitation Link Generation).
 - **Styling**: Tailwind CSS with Zinc/Neutral dark palette (`#09090b`).
 - **Internationalization (i18n)**: English (🇬🇧) and Romanian (🇷🇴) dictionary managed via `LanguageProvider` & `useLanguage()`.
-- **State & Context**: `InterviewProvider` & `useInterviews()` hook syncing PostgreSQL transcripts and `localStorage` cache.
+- **State & Context**: `InterviewProvider`, `AdminAuthProvider` (`useAdminAuth()`), and `useInterviews()` hook syncing PostgreSQL transcripts and JWT auth state.
 
 ### Backend Architecture (`api/`)
 
 - **FastAPI**: Asynchronous Python backend with SQLAlchemy 2.0 AsyncSession.
+- **Authentication & Security**:
+  - `users` table with bcrypt password hashes.
+  - JWT Bearer Token generation (`HS256`).
+  - Route protection dependencies: `get_current_user`, `get_current_admin`.
+  - Open public candidate endpoints for interview rooms.
 - **Endpoints**:
   - `POST /api/v1/interviews`: Creates interview and generates personalized AI opening question.
   - `POST /api/v1/interviews/{id}/stream`: Real-time token streaming via Server-Sent Events (SSE).
@@ -74,21 +80,40 @@ The **AI-Powered Job Interviewer** is a modern, privacy-centric platform designe
 ### Dynamic Topic State Machine & Pacing
 
 - **Dynamic Job Description Extraction**: Upon session creation, the backend extracts 4 to 6 core technical pillars directly from the Job Description (e.g., `["React 19 & TypeScript", "Python FastAPI", "PostgreSQL Optimization", "Docker & CI/CD"]`).
-- **Deterministic Topic Transitions**:
-  - Each topic is capped at a maximum of 1 follow-up turn.
-  - If the candidate answers or requests to pass (*"nu stiu", "sa continuam", "skip"*), the backend state machine automatically advances `current_topic_index += 1`, resets the follow-up counter, and gives the LLM the next topic.
-  - When all topics in the plan are covered, the interview concludes autonomously and generates the candidate evaluation report.
-- **Zero-Repetition & Anti-Echo Protocol**: The LLM prompt is strictly instructed to evaluate only the candidate's latest turn, with explicit anti-echo mandates preventing verbatim repetition of previous interviewer questions.
+- **Direct, Natural Opening Turn**:
+  - Greet candidate warmly in 1 natural sentence (with username sanitization, e.g. `Dariusbotezan2026` $\rightarrow$ `Darius`).
+  - Immediately pose **Question 1** on the first technical pillar extracted from the Job Description at the chosen seniority level (`MID`).
+  - Eliminates awkward robotic meta-intro dialogues (*"V-aș ruga să mă accepti..."* / *"Sesionul va dura..."*).
+- **Deterministic Intent Classification & Safety Bounds**:
+  - `CLARIFICATION`: Explains requested concept concisely (1-2 sentences) and repeats `active_question_text`. The active question is **NOT marked answered**.
+  - Consecutive clarifications are bounded by safety threshold (`CLARIFICATION_STEER_THRESHOLD = 3`).
+  - `REFUSAL_OR_DONT_KNOW`: Acknowledges supportively in 1 sentence and rotates to the next competency.
+  - `LANGUAGE_REQUEST`: Switches language dynamically (`ro` / `en`) and translates active question without penalty.
+  - `ANSWER`: Acknowledges candidate's answer, marks competency in `assessed_topics`, and moves to next question.
+- **Context Window Management & Progressive Summarization**:
+  - Token threshold monitoring (`CONTEXT_TOKEN_THRESHOLD_RATIO = 0.60`).
+  - Rolling window of recent messages (`RECENT_MESSAGES_WINDOW_COUNT = 6`).
+  - Progressive cumulative summary stored in PostgreSQL (`interviews.conversation_summary`).
+  - Map-Reduce chunked evaluation (`evaluate_interview`) for long transcripts.
 
 ### LLM Module (`llm/`)
 
 - Standalone AI provider abstractions (`BaseLLMProvider`).
-- `OllamaProvider`: Native asynchronous HTTP client for local model serving with sampling parameters (`repeat_penalty: 1.18`, `presence_penalty: 0.6`, `frequency_penalty: 0.5`, `top_p: 0.9`).
-- `INTERVIEWER_SYSTEM_PROMPT`: Structured prompt builder injecting dynamic topic focus, few-shot turn examples, and strict language mirroring.
-  - **Assessment Checklist**: Multi-dimensional competencies (Core Technology, Architecture & Scalability, Database Modeling, CV Claims, Edge Cases) evaluated before concluding.
-  - **Intent Classification & Re-steering**: Differentiates candidate answers (`[ANSWER]`) from counter-questions / clarifications (`[QUESTION]`). Clarifications are answered concisely while steering the candidate back to the active problem without losing context.
-  - **Autonomous Completion Protocol**: AI emits `[INTERVIEW_COMPLETE]` once checklist evidence is sufficient.
-- **Deterministic State Tracking**: PostgreSQL persists `active_question_number` and `consecutive_clarifications`. Soft prompt steering is injected if clarifications exceed `CLARIFICATION_STEER_THRESHOLD` (3), with `SAFETY_MAX_QUESTIONS` (15) acting strictly as an abnormal loop failsafe.
+- `OllamaProvider`: Native asynchronous HTTP client for local Qwen 3.5 8B model serving with sampling parameters and streaming SSE support.
+- Modular, focused prompt templates in `llm/prompts.py` avoiding bloated system prompts.
+- **Fair Evaluation Principles**: Evaluator strictly differentiates clarifications and language switches from knowledge gaps, scoring only demonstrated technical proficiency.
+
+### Automated Test Suite (`api/tests/`)
+
+- **Pytest Asyncio Test Suite**: 49 automated unit and integration tests executed in <5s without external Ollama dependencies.
+- **Unit Tests (`api/tests/unit/`)**:
+  - `test_prompts.py`: Seniority rubrics, Romanian 2nd person singular tone, direct question 1 generation, clarifications, skips, and evaluation aggregation.
+  - `test_intent_classifier.py`: Exact intent classification (`READY`, `CLARIFICATION`, `REFUSAL`, `LANGUAGE_REQUEST`, `ANSWER`), candidate name sanitizer, and response cleaner.
+  - `test_interview_service.py`: State machine transitions, clarification counters, language switching, and lifecycle management.
+  - `test_auth_service.py`: Bcrypt password hashing, JWT encoding/decoding, and expiration.
+  - `test_cv_service.py`: Magic bytes validation, in-memory PDF/DOCX parsing, and heuristic extraction fallback.
+- **Integration Tests (`api/tests/integration/`)**:
+  - `test_api_endpoints.py`: End-to-end testing of `/api/v1/auth/*`, `/api/v1/interviews/*` (chat, streaming SSE, screening, lifecycle), and error boundaries.
 
 ### Documentation & Docker
 

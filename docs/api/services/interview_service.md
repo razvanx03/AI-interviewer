@@ -6,6 +6,8 @@
   - PostgreSQL session management via SQLAlchemy 2.0 `AsyncSession`.
   - Dynamic topic state machine extracted from Job Description.
   - Multi-CV candidate screening and scoring (`screen_candidates`).
+  - **Human Override Selection**: If the human user explicitly chooses a candidate in Step 3, their selection is honored with top priority (`selected_candidate_name`), overriding the AI's default #1 match score ranking.
+  - **Output Sanitization & Anti-Roleplay**: `_clean_llm_response` automatically removes any `<think>` blocks, persona prefixes (e.g. `**You (...):**`, `Interviewer:`), and outer quotes from LLM outputs.
   - **Smart Name Extraction Fallback**: If a candidate's name is the default fallback `"Candidate"` (e.g. from `CV.pdf`), extracts the candidate's real full name from the document header while strictly preserving any custom or pre-set candidate names.
   - Conversational message streaming via SSE (`/stream`).
   - Comprehensive candidate evaluation generation upon completion.

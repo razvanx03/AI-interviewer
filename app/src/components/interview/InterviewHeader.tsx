@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { ArrowLeft, Check, Share2, Bot, StopCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ArrowLeft, Check, Share2, Bot, StopCircle, Timer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ModeToggle } from '@/components/mode-toggle';
+import { useAdminAuth } from '@/hooks/use-admin-auth';
 import { InterviewSession } from '@/types';
 
 interface InterviewHeaderProps {
@@ -16,7 +17,46 @@ export const InterviewHeader: React.FC<InterviewHeaderProps> = ({
   onBackToHome,
   onEndInterview,
 }) => {
+  const { isAdmin } = useAdminAuth();
   const [copied, setCopied] = useState(false);
+
+  // Time remaining in seconds
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(() => {
+    if (!session.timeLimitMinutes || session.status === 'completed') return null;
+    const createdAtMs = new Date(session.createdAt).getTime();
+    const durationMs = session.timeLimitMinutes * 60 * 1000;
+    const endMs = createdAtMs + durationMs;
+    return Math.max(0, Math.floor((endMs - Date.now()) / 1000));
+  });
+
+  useEffect(() => {
+    if (!session.timeLimitMinutes || session.status === 'completed') {
+      setRemainingSeconds(null);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const createdAtMs = new Date(session.createdAt).getTime();
+      const durationMs = session.timeLimitMinutes! * 60 * 1000;
+      const endMs = createdAtMs + durationMs;
+      const rem = Math.max(0, Math.floor((endMs - Date.now()) / 1000));
+
+      setRemainingSeconds(rem);
+
+      if (rem <= 0) {
+        clearInterval(interval);
+        onEndInterview();
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [session.createdAt, session.timeLimitMinutes, session.status, onEndInterview]);
+
+  const formatTimer = (totalSec: number) => {
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
 
   const handleCopyLink = () => {
     const url = window.location.href;
@@ -31,15 +71,17 @@ export const InterviewHeader: React.FC<InterviewHeaderProps> = ({
       <div className="container mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-8">
         {/* Left: Back & Title */}
         <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onBackToHome}
-            className="h-9 w-9 text-muted-foreground hover:text-foreground"
-            title="Return to Dashboard"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
+          {isAdmin && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onBackToHome}
+              className="h-9 w-9 text-muted-foreground hover:text-foreground"
+              title="Return to Dashboard"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+          )}
 
           <div className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
@@ -66,6 +108,23 @@ export const InterviewHeader: React.FC<InterviewHeaderProps> = ({
 
         {/* Right: Actions */}
         <div className="flex items-center gap-2">
+          {/* Live Countdown Timer Badge */}
+          {remainingSeconds !== null && session.status !== 'completed' && (
+            <div
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-xs select-none transition-colors ${
+                remainingSeconds < 60
+                  ? 'bg-red-500/15 text-red-500 border-red-500/40 animate-pulse font-bold'
+                  : remainingSeconds < 180
+                    ? 'bg-amber-500/15 text-amber-500 border-amber-500/30 font-semibold'
+                    : 'bg-muted/50 text-foreground border-border/80'
+              }`}
+              title={`Allocated duration: ${session.timeLimitMinutes} minutes`}
+            >
+              <Timer className="h-3.5 w-3.5" />
+              <span>{formatTimer(remainingSeconds)}</span>
+            </div>
+          )}
+
           {/* Shareable Link Copier */}
           <Button
             variant="outline"
@@ -92,7 +151,7 @@ export const InterviewHeader: React.FC<InterviewHeaderProps> = ({
               variant="secondary"
               size="sm"
               onClick={onEndInterview}
-              className="gap-1.5 text-xs text-destructive hover:bg-destructive/10"
+              className="gap-1.5 text-xs text-destructive hover:bg-destructive/10 cursor-pointer"
             >
               <StopCircle className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Finish</span>
@@ -101,7 +160,7 @@ export const InterviewHeader: React.FC<InterviewHeaderProps> = ({
 
           <Badge
             variant={session.status === 'completed' ? 'success' : 'default'}
-            className="text-xs capitalize"
+            className="text-xs capitalize select-none"
           >
             {session.status === 'completed' ? 'Completed' : 'Live Interview'}
           </Badge>

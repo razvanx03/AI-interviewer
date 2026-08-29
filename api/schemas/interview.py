@@ -64,6 +64,8 @@ class InterviewCreate(BaseModel):
     candidate_name: Optional[str] = Field("Candidate", description="Candidate's name")
     cv_filename: Optional[str] = Field(None, description="Uploaded CV filename")
     cv_raw_text: Optional[str] = Field(None, description="Extracted text from CV")
+    time_limit_minutes: Optional[int] = Field(None, ge=10, le=120, description="Optional interview time limit in minutes")
+    language: Optional[str] = Field("en", description="Interview spoken language (en or ro)")
 
 class InterviewResponse(BaseModel):
     id: str
@@ -74,7 +76,14 @@ class InterviewResponse(BaseModel):
     candidate_name: Optional[str] = "Candidate"
     cv_filename: Optional[str] = None
     status: InterviewStatus = InterviewStatus.ACTIVE
-    active_question_number: Optional[int] = 1
+    active_question_number: Optional[int] = None
+    active_question_text: Optional[str] = None
+    active_question_status: Optional[str] = "INTRO"
+    topics_plan: Optional[List[str]] = None
+    assessed_topics: Optional[List[str]] = None
+    time_limit_minutes: Optional[int] = None
+    language: Optional[str] = "en"
+    conversation_summary: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     total_questions: int = 0
