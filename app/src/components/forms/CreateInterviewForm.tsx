@@ -16,6 +16,7 @@ import {
   ChevronRight,
   ExternalLink,
   FileText,
+  GripVertical,
 } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -67,6 +68,42 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
   const [screeningResults, setScreeningResults] = useState<CandidateScreeningResult[]>([]);
   const [topCandidate, setTopCandidate] = useState<CandidateScreeningResult | null>(null);
   const [createdSession, setCreatedSession] = useState<InterviewSession | null>(null);
+
+  // Step 3 Resizable Splitter state (50/50 default balance)
+  const [splitRatio, setSplitRatio] = useState<number>(50); // 50% left, 50% right
+  const [isDraggingSplitter, setIsDraggingSplitter] = useState<boolean>(false);
+  const splitContainerRef = React.useRef<HTMLDivElement>(null);
+
+  const handleMouseDownSplitter = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDraggingSplitter(true);
+  };
+
+  useEffect(() => {
+    if (!isDraggingSplitter) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!splitContainerRef.current) return;
+      const rect = splitContainerRef.current.getBoundingClientRect();
+      const relativeX = e.clientX - rect.left;
+      const newPercent = (relativeX / rect.width) * 100;
+      // Clamp between 25% and 75%
+      const clamped = Math.max(25, Math.min(75, newPercent));
+      setSplitRatio(clamped);
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingSplitter(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingSplitter]);
 
   const [isScreening, setIsScreening] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
@@ -315,10 +352,10 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
     createdSession?.screeningResults?.find((r) => r.is_selected) ||
     createdSession?.screeningResults?.[0];
 
-  const activeOtherCandidates =
+  const allRankedCandidates =
     screeningResults.length > 0
-      ? screeningResults.filter((r) => r.name !== activeTopCandidate?.name)
-      : createdSession?.screeningResults?.filter((r) => r !== activeTopCandidate) || [];
+      ? screeningResults
+      : createdSession?.screeningResults || (topCandidate ? [topCandidate] : []);
 
   const activeCandidateFile = useMemo(() => {
     if (!activeTopCandidate) return null;
@@ -709,9 +746,25 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
 
       {/* STEP 3: AI SCREENING SELECTION & INVITATION HUB */}
       {currentStep === 3 && activeTopCandidate && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 flex-1 w-full min-h-0 items-stretch">
-          {/* Left Column (5 cols): Selection Card with Bottom Navigation */}
-          <div className="lg:col-span-5 flex flex-col gap-4 min-h-0">
+        <div
+          ref={splitContainerRef}
+          className={`flex flex-col lg:flex-row flex-1 w-full min-h-0 items-stretch relative gap-4 lg:gap-0 ${
+            isDraggingSplitter ? 'select-none cursor-col-resize' : ''
+          }`}
+        >
+          {/* Left Column: Selection Card with Bottom Navigation */}
+          <div
+            className="w-full lg:flex-none flex flex-col gap-4 min-h-0 lg:pr-3"
+            style={{ width: undefined }}
+            // Apply dynamic width on desktop
+            ref={(el) => {
+              if (el && window.innerWidth >= 1024) {
+                el.style.width = `${splitRatio}%`;
+              } else if (el) {
+                el.style.width = '100%';
+              }
+            }}
+          >
             <Card className="border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
               <CardContent className="p-4 sm:p-6 flex-1 flex flex-col justify-between space-y-4 min-h-0 overflow-y-auto">
                 <div className="space-y-4">
@@ -761,52 +814,89 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                     </div>
                   </div>
 
-                  {/* Other Evaluated Applicants Pool */}
-                  {activeOtherCandidates.length > 0 && (
+                  {/* Top Candidates Leaderboard (All Ranked Candidates) */}
+                  {allRankedCandidates.length > 0 && (
                     <div className="rounded-xl border border-border/80 bg-muted/20 p-3.5 space-y-2.5">
                       <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground">
                         <div className="flex items-center gap-1.5">
                           <Trophy className="h-3.5 w-3.5 text-amber-500" />
                           <span>
-                            {t.form.otherApplicants} ({activeOtherCandidates.length})
+                            {t.form.otherApplicants} ({allRankedCandidates.length})
                           </span>
                         </div>
                         <span className="text-[10px] text-muted-foreground/80">
-                          Click to switch
+                          Click to select
                         </span>
                       </div>
 
-                      <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                        {activeOtherCandidates.map((cand, idx) => (
-                          <div
-                            key={idx}
-                            onClick={() => handleSelectCandidate(cand)}
-                            className="group flex items-center justify-between rounded-lg border border-border/70 bg-card hover:bg-accent hover:border-border p-2.5 px-3 text-xs transition-all cursor-pointer select-none gap-2"
-                          >
-                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-mono font-bold text-muted-foreground group-hover:bg-primary/20 group-hover:text-primary transition-colors">
-                                #{idx + 2}
-                              </span>
-                              <div className="min-w-0 flex-1 pr-1">
-                                <span className="font-semibold text-foreground group-hover:text-foreground transition-colors block truncate select-none">
-                                  {cand.name}
+                      <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                        {allRankedCandidates.map((cand, idx) => {
+                          const isSelected =
+                            cand.name.toLowerCase() === activeTopCandidate?.name.toLowerCase();
+                          return (
+                            <div
+                              key={idx}
+                              onClick={() => handleSelectCandidate(cand)}
+                              className={`group flex items-center justify-between rounded-lg border p-2.5 px-3 text-xs transition-all cursor-pointer select-none gap-2 ${
+                                isSelected
+                                  ? 'border-primary/80 bg-primary/10 ring-1 ring-primary/30 shadow-2xs'
+                                  : 'border-border/70 bg-card hover:bg-accent hover:border-border'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                <span
+                                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-mono font-bold transition-colors ${
+                                    isSelected
+                                      ? 'bg-primary text-primary-foreground shadow-2xs'
+                                      : 'bg-muted text-muted-foreground group-hover:bg-primary/20 group-hover:text-primary'
+                                  }`}
+                                >
+                                  #{idx + 1}
                                 </span>
-                                <span className="text-[11px] text-muted-foreground transition-colors truncate block select-none">
-                                  {cand.strengths?.[0] || 'Applicant profile'}
-                                </span>
+                                <div className="min-w-0 flex-1 pr-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span
+                                      className={`font-semibold transition-colors truncate select-none ${
+                                        isSelected
+                                          ? 'text-foreground font-bold'
+                                          : 'text-foreground group-hover:text-foreground'
+                                      }`}
+                                    >
+                                      {cand.name}
+                                    </span>
+                                    {isSelected && (
+                                      <Badge className="bg-primary hover:bg-primary text-primary-foreground text-[9px] px-1.5 py-0 h-4 font-bold uppercase tracking-wider select-none">
+                                        Selected
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <span className="text-[11px] text-muted-foreground transition-colors truncate block select-none">
+                                    {cand.strengths?.[0] || 'Applicant profile'}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[11px] font-mono select-none transition-colors px-1.5 py-0.5 ${
+                                    isSelected
+                                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 font-bold'
+                                      : 'bg-emerald-500/10 group-hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                  }`}
+                                >
+                                  {cand.match_score}% Match
+                                </Badge>
+                                <ChevronRight
+                                  className={`h-4 w-4 transition-colors ${
+                                    isSelected
+                                      ? 'text-primary'
+                                      : 'text-muted-foreground group-hover:text-foreground'
+                                  }`}
+                                />
                               </div>
                             </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <Badge
-                                variant="outline"
-                                className="bg-emerald-500/10 group-hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[11px] font-mono select-none transition-colors px-1.5 py-0.5"
-                              >
-                                {cand.match_score}% Match
-                              </Badge>
-                              <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -897,9 +987,48 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
             </Card>
           </div>
 
-          {/* Right Column (7 cols): Separate Dedicated High-Resolution Document Reader */}
-          <div className="lg:col-span-7 flex flex-col min-h-0">
-            <div className="rounded-xl border border-border bg-card shadow-xs overflow-hidden flex flex-col flex-1 h-full min-h-[500px] lg:min-h-0">
+          {/* Desktop Draggable Splitter Divider */}
+          <div
+            onMouseDown={handleMouseDownSplitter}
+            className="hidden lg:flex w-4 items-center justify-center cursor-col-resize group z-20 shrink-0 select-none py-2 hover:opacity-100"
+            title="Drag left or right to resize panels"
+          >
+            <div
+              className={`h-full w-[2px] rounded-full transition-all flex items-center justify-center ${
+                isDraggingSplitter
+                  ? 'bg-primary w-[3px]'
+                  : 'bg-border/80 group-hover:bg-primary/70 group-hover:w-[3px]'
+              }`}
+            >
+              <div
+                className={`p-1 rounded-sm shadow-xs transition-all ${
+                  isDraggingSplitter
+                    ? 'bg-primary text-primary-foreground scale-110'
+                    : 'bg-card border border-border text-muted-foreground group-hover:bg-primary group-hover:text-primary-foreground group-hover:border-primary'
+                }`}
+              >
+                <GripVertical className="h-3.5 w-3.5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column: Separate Dedicated High-Resolution Document Reader */}
+          <div
+            className="w-full lg:flex-none flex flex-col min-h-0 lg:pl-3"
+            style={{ width: undefined }}
+            ref={(el) => {
+              if (el && window.innerWidth >= 1024) {
+                el.style.width = `${100 - splitRatio}%`;
+              } else if (el) {
+                el.style.width = '100%';
+              }
+            }}
+          >
+            <div className="rounded-xl border border-border bg-card shadow-xs overflow-hidden flex flex-col flex-1 h-full min-h-[500px] lg:min-h-0 relative">
+              {/* Transparent drag shield over iframe to prevent mouse capturing while dragging */}
+              {isDraggingSplitter && (
+                <div className="absolute inset-0 z-30 bg-transparent cursor-col-resize select-none" />
+              )}
               {/* Document Header Ribbon */}
               <div className="flex items-center justify-between p-3.5 px-4 border-b border-border/80 bg-muted/40 shrink-0">
                 <div className="flex items-center gap-2.5 min-w-0">

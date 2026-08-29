@@ -135,28 +135,30 @@ export const CVUploader: React.FC<CVUploaderProps> = ({
         </div>
       )}
 
-      {/* Multi-file Dropzone */}
+      {/* Multi-file Dropzone (Compact, Balanced & Centered) */}
       <div
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={() => fileInputRef.current?.click()}
-        className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-5 sm:p-7 text-center transition-all ${
+        className={`flex cursor-pointer flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4 rounded-xl border-2 border-dashed py-4 sm:py-5 px-5 text-center transition-all shrink-0 min-h-[72px] sm:min-h-[80px] ${
           isDragging
             ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
             : 'border-border/80 hover:border-primary/50 hover:bg-muted/30'
         }`}
       >
-        <div className="mb-2.5 flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full bg-blue-500/15 text-blue-500 dark:text-blue-400 border border-blue-500/30 shadow-2xs">
-          <UploadCloud className="h-5 w-5 sm:h-5.5 sm:w-5.5" />
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/15 text-blue-500 dark:text-blue-400 border border-blue-500/30 shadow-2xs">
+          <UploadCloud className="h-4.5 w-4.5 text-blue-500" />
         </div>
-        <p className="text-xs sm:text-sm font-medium text-foreground">
-          {t.cvUploader.dragPrompt}{' '}
-          <span className="text-primary underline">{t.cvUploader.browse}</span>
-        </p>
-        <p className="mt-0.5 text-[11px] sm:text-xs text-muted-foreground">
-          {t.cvUploader.supportedTypes}
-        </p>
+        <div className="text-center sm:text-left space-y-0.5">
+          <p className="text-xs sm:text-sm font-medium text-foreground leading-snug">
+            {t.cvUploader.dragPrompt}{' '}
+            <span className="text-primary underline font-semibold">{t.cvUploader.browse}</span>
+          </p>
+          <p className="text-[11px] text-muted-foreground leading-tight">
+            {t.cvUploader.supportedTypes}
+          </p>
+        </div>
       </div>
 
       {/* Queue list of candidates */}
@@ -172,7 +174,7 @@ export const CVUploader: React.FC<CVUploaderProps> = ({
             </Badge>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 max-h-72 overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 max-h-[380px] sm:max-h-[440px] overflow-y-auto pr-1">
             {candidates.map((cand, idx) => (
               <div
                 key={cand.id || idx}

@@ -186,7 +186,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navigate = useNavigate();
   const { t } = useLanguage();
 
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [clearModalOpen, setClearModalOpen] = useState(false);
@@ -268,85 +268,97 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Sidebar Container with Smooth Width Transition */}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex flex-col border-r border-border bg-card/95 backdrop-blur transition-all duration-300 ease-in-out',
+          'fixed inset-y-0 left-0 z-50 flex flex-col border-r border-border bg-card/95 backdrop-blur overflow-hidden transition-[width,transform] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]',
           /* Mobile behavior: full 72 width slide-in */
           'w-72',
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
           /* Desktop behavior: static in flow, collapsible rail */
           'md:static md:translate-x-0',
-          isCollapsed ? 'md:w-16 md:items-center' : 'md:w-72'
+          isCollapsed ? 'md:w-16' : 'md:w-72'
         )}
       >
         {/* COLLAPSED STATE (Desktop only - ChatGPT Style Narrow Rail) */}
-        {isCollapsed && (
-          <div className="hidden md:flex h-full w-full flex-col items-center justify-between py-3">
-            {/* Top Icons */}
-            <div className="flex flex-col items-center gap-3">
-              {/* App Logo */}
-              <div
-                onClick={handleNewInterview}
-                className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-xs transition-opacity hover:opacity-90"
-                title={t.brand.name}
-              >
-                <Bot className="h-5 w-5" />
-              </div>
-
-              {/* [DEV ONLY] Collapsed Clear DB Button */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setClearModalOpen(true)}
-                className="h-9 w-9 rounded-lg text-red-500 hover:bg-red-500/10 hover:text-red-600"
-                title="[DEV ONLY] Clear Entire Database"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-
-              {/* New Interview Button */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleNewInterview}
-                className="h-9 w-9 rounded-lg text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                title={t.sidebar.newInterview}
-              >
-                <Plus className="h-4.5 w-4.5" />
-              </Button>
-
-              {/* Search Button (expands sidebar and opens search) */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => {
-                  onToggleCollapse();
-                  setSearchOpen(true);
-                }}
-                className="h-9 w-9 rounded-lg text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                title="Search interviews"
-              >
-                <Search className="h-4 w-4" />
-              </Button>
+        <div
+          className={cn(
+            'hidden md:flex absolute inset-0 w-16 flex-col items-center justify-between py-3 transition-opacity duration-200 ease-in-out',
+            isCollapsed
+              ? 'opacity-100 pointer-events-auto z-10'
+              : 'opacity-0 pointer-events-none z-0'
+          )}
+        >
+          {/* Top Icons */}
+          <div className="flex flex-col items-center gap-3">
+            {/* App Logo */}
+            <div
+              onClick={handleNewInterview}
+              className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-xs transition-opacity hover:opacity-90"
+              title={t.brand.name}
+            >
+              <Bot className="h-5 w-5" />
             </div>
 
-            {/* Bottom Actions: Settings on top, Expand Sidebar Button on bottom */}
-            <div className="flex flex-col items-center gap-2 pt-2">
-              <SettingsMenu />
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onToggleCollapse}
-                className="h-8 w-8 rounded-lg text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                title="Expand sidebar"
-              >
-                <PanelLeftOpen className="h-4 w-4" />
-                <span className="sr-only">Expand sidebar</span>
-              </Button>
-            </div>
+            {/* [DEV ONLY] Collapsed Clear DB Button */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setClearModalOpen(true)}
+              className="h-9 w-9 rounded-lg text-red-500 hover:bg-red-500/10 hover:text-red-600"
+              title="[DEV ONLY] Clear Entire Database"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+
+            {/* New Interview Button */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleNewInterview}
+              className="h-9 w-9 rounded-lg text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              title={t.sidebar.newInterview}
+            >
+              <Plus className="h-4.5 w-4.5" />
+            </Button>
+
+            {/* Search Button (expands sidebar and opens search) */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                onToggleCollapse();
+                setSearchOpen(true);
+              }}
+              className="h-9 w-9 rounded-lg text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              title="Search interviews"
+            >
+              <Search className="h-4 w-4" />
+            </Button>
           </div>
-        )}
+
+          {/* Bottom Actions: Settings on top, Expand Sidebar Button on bottom */}
+          <div className="flex flex-col items-center gap-2 pt-2">
+            <SettingsMenu />
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onToggleCollapse}
+              className="h-8 w-8 rounded-lg text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              title="Expand sidebar"
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+              <span className="sr-only">Expand sidebar</span>
+            </Button>
+          </div>
+        </div>
 
         {/* EXPANDED FULL SIDEBAR (Always on Mobile, or when not collapsed on Desktop) */}
-        <div className={cn('flex h-full w-full flex-col', isCollapsed && 'md:hidden')}>
+        <div
+          className={cn(
+            'flex h-full w-72 min-w-[18rem] flex-col transition-opacity duration-200 ease-in-out',
+            isCollapsed
+              ? 'opacity-0 pointer-events-none md:invisible'
+              : 'opacity-100 pointer-events-auto'
+          )}
+        >
           {/* Top Header & Brand */}
           <div className="flex h-16 shrink-0 items-center justify-between border-b border-border px-4">
             <div
@@ -402,9 +414,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </Button>
           </div>
 
-          {/* Search Bar Toggle & Input */}
-          <div className="px-3 pb-1 shrink-0">
-            <div className="flex items-center justify-between px-1 py-1.5 text-xs text-muted-foreground">
+          {/* Search Bar Toggle & Animated Input Accordion */}
+          <div className="px-3 shrink-0">
+            <div className="flex items-center justify-between px-1 pt-1 pb-0.5 text-xs text-muted-foreground">
               <span className="text-[11px] font-semibold uppercase tracking-wider">
                 {t.sidebar.historyTitle}
               </span>
@@ -420,25 +432,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             <div
               className={cn(
-                'grid transition-all duration-200 ease-in-out',
-                searchOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+                'grid transition-all duration-200 ease-out',
+                searchOpen
+                  ? 'grid-rows-[1fr] opacity-100 mt-1 mb-1.5'
+                  : 'grid-rows-[0fr] opacity-0 m-0'
               )}
             >
-              <div className="overflow-hidden p-1 mb-3">
+              <div className="overflow-hidden">
                 <Input
                   type="text"
                   placeholder={t.sidebar.searchPlaceholder}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="h-8 text-xs bg-background/50 focus-visible:ring-1 focus-visible:ring-ring"
-                  autoFocus={searchOpen}
                 />
               </div>
             </div>
           </div>
 
           {/* History List */}
-          <div className="flex-1 overflow-y-auto px-3 py-1">
+          <div className="flex-1 overflow-y-auto px-3 pt-0.5 pb-1">
             {interviews.length === 0 ? (
               <div className="px-3 py-8 text-center text-xs text-muted-foreground">
                 <MessageSquare className="mx-auto mb-2 h-6 w-6 opacity-40" />
