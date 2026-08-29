@@ -350,9 +350,9 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
   }, [activePdfUrl]);
 
   return (
-    <div className="w-full space-y-4">
+    <div className="w-full flex-1 flex flex-col gap-3 sm:gap-4 min-h-0">
       {/* 3-Step Wizard Progress Stepper */}
-      <div className="grid grid-cols-3 gap-1.5 sm:gap-2 rounded-xl border border-border/80 bg-card/90 p-1.5 sm:p-2 backdrop-blur shadow-xs">
+      <div className="w-full grid grid-cols-3 gap-1.5 sm:gap-2 rounded-xl border border-border/80 bg-card/90 p-1.5 sm:p-2 backdrop-blur shadow-xs shrink-0">
         {/* Step 1 Button */}
         <button
           type="button"
@@ -458,88 +458,87 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
         </button>
       </div>
 
-      {/* Main Wizard Card */}
-      <Card className="w-full border-border bg-card shadow-xs">
-        {/* STEP 1: JOB SPECIFICATION */}
-        {currentStep === 1 && (
-          <>
-            <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-4">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl bg-blue-500/15 text-blue-500 dark:text-blue-400 border border-blue-500/30 shadow-2xs">
-                    <Briefcase className="h-4 w-4 sm:h-4.5 sm:w-4.5" />
-                  </div>
-                  <div className="min-w-0">
-                    <CardTitle className="text-base sm:text-lg font-bold truncate">
-                      {t.form.step1Title}
-                    </CardTitle>
-                    <CardDescription className="text-xs text-muted-foreground mt-0.5">
-                      {t.form.step1Subtitle}
-                    </CardDescription>
-                  </div>
+      {/* STEP 1: JOB SPECIFICATION */}
+      {currentStep === 1 && (
+        <Card className="w-full flex-1 flex flex-col border-border bg-card shadow-xs min-h-0">
+          <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-3 shrink-0">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl bg-blue-500/15 text-blue-500 dark:text-blue-400 border border-blue-500/30 shadow-2xs">
+                  <Briefcase className="h-4 w-4 sm:h-4.5 sm:w-4.5" />
                 </div>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={fillSampleJob}
-                  className="h-8 text-xs font-medium text-foreground hover:bg-accent hover:border-border shrink-0 px-2.5 sm:px-3 shadow-2xs cursor-pointer"
-                >
-                  <Sparkles className="mr-1.5 h-3.5 w-3.5 text-amber-500" />
-                  <span>{t.form.fillJobSample}</span>
-                </Button>
+                <div className="min-w-0">
+                  <CardTitle className="text-base sm:text-lg font-bold truncate">
+                    {t.form.step1Title}
+                  </CardTitle>
+                  <CardDescription className="text-xs text-muted-foreground mt-0.5">
+                    {t.form.step1Subtitle}
+                  </CardDescription>
+                </div>
               </div>
-            </CardHeader>
 
-            <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0">
-              <form onSubmit={handleNextStep1} className="space-y-4">
-                {formError && (
-                  <div className="flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs font-medium text-destructive">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <span>{formError}</span>
-                  </div>
-                )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={fillSampleJob}
+                className="h-8 text-xs font-medium text-foreground hover:bg-accent hover:border-border shrink-0 px-2.5 sm:px-3 shadow-2xs cursor-pointer"
+              >
+                <Sparkles className="mr-1.5 h-3.5 w-3.5 text-amber-500" />
+                <span>{t.form.fillJobSample}</span>
+              </Button>
+            </div>
+          </CardHeader>
 
-                {/* Job Title & Company */}
-                <div className="grid grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label
-                      htmlFor="jobTitle"
-                      className="flex items-center gap-1.5 text-xs sm:text-sm"
-                    >
-                      <Briefcase className="h-3.5 w-3.5 text-muted-foreground" />
-                      {t.form.jobTitleLabel} <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
-                      id="jobTitle"
-                      placeholder={t.form.jobTitlePlaceholder}
-                      value={jobTitle}
-                      onChange={(e) => setJobTitle(e.target.value)}
-                      required
-                      className="h-9 sm:h-10 text-sm"
-                    />
-                  </div>
+          <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0 flex-1 flex flex-col min-h-0">
+            <form
+              onSubmit={handleNextStep1}
+              className="flex-1 flex flex-col justify-between gap-4 min-h-0"
+            >
+              {formError && (
+                <div className="flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs font-medium text-destructive shrink-0">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span>{formError}</span>
+                </div>
+              )}
 
-                  <div className="space-y-1.5">
-                    <Label
-                      htmlFor="companyName"
-                      className="flex items-center gap-1.5 text-xs sm:text-sm"
-                    >
-                      <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                      {t.form.companyLabel}
-                    </Label>
-                    <Input
-                      id="companyName"
-                      placeholder={t.form.companyPlaceholder}
-                      value={companyName}
-                      onChange={(e) => setCompanyName(e.target.value)}
-                      className="h-9 sm:h-10 text-sm"
-                    />
-                  </div>
+              {/* Top Row: Job Title, Company, Seniority Level (3 columns on desktop) */}
+              <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-3 shrink-0">
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="jobTitle"
+                    className="flex items-center gap-1.5 text-xs sm:text-sm"
+                  >
+                    <Briefcase className="h-3.5 w-3.5 text-muted-foreground" />
+                    {t.form.jobTitleLabel} <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="jobTitle"
+                    placeholder={t.form.jobTitlePlaceholder}
+                    value={jobTitle}
+                    onChange={(e) => setJobTitle(e.target.value)}
+                    required
+                    className="h-9 sm:h-10 text-sm"
+                  />
                 </div>
 
-                {/* Seniority Level */}
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="companyName"
+                    className="flex items-center gap-1.5 text-xs sm:text-sm"
+                  >
+                    <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                    {t.form.companyLabel}
+                  </Label>
+                  <Input
+                    id="companyName"
+                    placeholder={t.form.companyPlaceholder}
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
+                    className="h-9 sm:h-10 text-sm"
+                  />
+                </div>
+
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="experienceLevel"
@@ -564,85 +563,89 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
 
-                {/* Job Description / Requirements */}
-                <div className="space-y-1.5">
-                  <Label
-                    htmlFor="jobDescription"
-                    className="flex items-center gap-1.5 text-xs sm:text-sm"
-                  >
-                    {t.form.jobDescLabel} <span className="text-destructive">*</span>
-                  </Label>
-                  <Textarea
-                    id="jobDescription"
-                    placeholder={t.form.jobDescPlaceholder}
-                    rows={8}
-                    value={jobDescription}
-                    onChange={(e) => setJobDescription(e.target.value)}
-                    className="min-h-[220px] sm:min-h-[260px] max-h-[440px] resize-y text-sm"
-                    required
-                  />
-                </div>
-
-                {/* Navigation Button */}
-                <div className="pt-2">
-                  <Button
-                    type="submit"
-                    size="lg"
-                    className="w-full gap-2 text-sm sm:text-base font-semibold h-11 sm:h-12 cursor-pointer shadow-sm"
-                  >
-                    <span>{t.form.nextStep}</span>
-                    <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </>
-        )}
-
-        {/* STEP 2: CANDIDATE POOL & CVs */}
-        {currentStep === 2 && (
-          <>
-            <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-4">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-500 dark:text-indigo-400 border border-indigo-500/30 shadow-2xs">
-                    <Users className="h-4 w-4 sm:h-4.5 sm:w-4.5" />
-                  </div>
-                  <div className="min-w-0">
-                    <CardTitle className="text-base sm:text-lg font-bold truncate">
-                      {t.form.step2Title}
-                    </CardTitle>
-                    <CardDescription className="text-xs text-muted-foreground mt-0.5">
-                      {t.form.step2Subtitle}
-                    </CardDescription>
-                  </div>
-                </div>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={fillSampleCandidates}
-                  className="h-8 text-xs font-medium text-foreground hover:bg-accent hover:border-border shrink-0 px-2.5 sm:px-3 shadow-2xs cursor-pointer"
+              {/* Job Description / Requirements (Fullscreen flex growth) */}
+              <div className="space-y-1.5 flex-1 flex flex-col min-h-0">
+                <Label
+                  htmlFor="jobDescription"
+                  className="flex items-center gap-1.5 text-xs sm:text-sm shrink-0"
                 >
-                  <Sparkles className="mr-1.5 h-3.5 w-3.5 text-amber-500" />
-                  <span>{t.form.loadSample}</span>
+                  {t.form.jobDescLabel} <span className="text-destructive">*</span>
+                </Label>
+                <Textarea
+                  id="jobDescription"
+                  placeholder={t.form.jobDescPlaceholder}
+                  value={jobDescription}
+                  onChange={(e) => setJobDescription(e.target.value)}
+                  className="flex-1 w-full min-h-[220px] sm:min-h-[280px] lg:min-h-[340px] resize-y text-sm leading-relaxed"
+                  required
+                />
+              </div>
+
+              {/* Navigation Button */}
+              <div className="pt-2 shrink-0">
+                <Button
+                  type="submit"
+                  size="lg"
+                  className="w-full gap-2 text-sm sm:text-base font-semibold h-11 sm:h-12 cursor-pointer shadow-sm"
+                >
+                  <span>{t.form.nextStep}</span>
+                  <ArrowRight className="h-4 w-4" />
                 </Button>
               </div>
-            </CardHeader>
+            </form>
+          </CardContent>
+        </Card>
+      )}
 
-            <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0">
-              <form onSubmit={handleStep2Screen} className="space-y-4">
-                {formError && (
-                  <div className="flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs font-medium text-destructive">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <span>{formError}</span>
-                  </div>
-                )}
+      {/* STEP 2: CANDIDATE POOL & CVs */}
+      {currentStep === 2 && (
+        <Card className="w-full flex-1 flex flex-col border-border bg-card shadow-xs min-h-0">
+          <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-3 shrink-0">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-500 dark:text-indigo-400 border border-indigo-500/30 shadow-2xs">
+                  <Users className="h-4 w-4 sm:h-4.5 sm:w-4.5" />
+                </div>
+                <div className="min-w-0">
+                  <CardTitle className="text-base sm:text-lg font-bold truncate">
+                    {t.form.step2Title}
+                  </CardTitle>
+                  <CardDescription className="text-xs text-muted-foreground mt-0.5">
+                    {t.form.step2Subtitle}
+                  </CardDescription>
+                </div>
+              </div>
 
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={fillSampleCandidates}
+                className="h-8 text-xs font-medium text-foreground hover:bg-accent hover:border-border shrink-0 px-2.5 sm:px-3 shadow-2xs cursor-pointer"
+              >
+                <Sparkles className="mr-1.5 h-3.5 w-3.5 text-amber-500" />
+                <span>{t.form.loadSample}</span>
+              </Button>
+            </div>
+          </CardHeader>
+
+          <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0 flex-1 flex flex-col min-h-0">
+            <form
+              onSubmit={handleStep2Screen}
+              className="flex-1 flex flex-col justify-between gap-4 min-h-0"
+            >
+              {formError && (
+                <div className="flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs font-medium text-destructive shrink-0">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
+              <div className="flex-1 flex flex-col gap-3 min-h-0">
                 {/* Job Summary Banner */}
-                <div className="flex items-center justify-between rounded-lg border border-border/80 bg-muted/40 p-2.5 px-3.5 text-xs">
+                <div className="flex items-center justify-between rounded-lg border border-border/80 bg-muted/40 p-2.5 px-3.5 text-xs shrink-0">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="font-semibold text-foreground truncate">{jobTitle}</span>
                     {companyName && (
@@ -657,216 +660,208 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                 </div>
 
                 {/* Multi-CV Upload Dropzone & Queue */}
-                <CVUploader
-                  candidates={candidates}
-                  onAddFiles={handleAddFiles}
-                  onRemoveCandidate={handleRemoveCandidate}
-                  onUpdateCandidateName={handleUpdateCandidateName}
-                />
-
-                {/* Step 2 Actions */}
-                <div className="pt-3 flex flex-col-reverse sm:flex-row items-stretch justify-between gap-2.5">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="lg"
-                    onClick={() => goToStep(1)}
-                    className="w-full sm:w-auto gap-2 text-sm font-semibold h-11 sm:h-12 px-5 cursor-pointer"
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                    <span>{t.form.prevStep}</span>
-                  </Button>
-
-                  <Button
-                    type="submit"
-                    disabled={isScreening || candidates.length === 0}
-                    size="lg"
-                    className="w-full sm:flex-1 gap-2 text-sm sm:text-base font-semibold h-11 sm:h-12 cursor-pointer shadow-sm"
-                  >
-                    {isScreening ? (
-                      <div className="flex items-center gap-2">
-                        <ThinkingOrb state="working" size={20} />
-                        <span>{t.form.generatingButton}</span>
-                      </div>
-                    ) : (
-                      <>
-                        <span>{t.form.screenAndReview}</span>
-                        <ArrowRight className="h-4 w-4" />
-                      </>
-                    )}
-                  </Button>
+                <div className="flex-1 flex flex-col min-h-0">
+                  <CVUploader
+                    candidates={candidates}
+                    onAddFiles={handleAddFiles}
+                    onRemoveCandidate={handleRemoveCandidate}
+                    onUpdateCandidateName={handleUpdateCandidateName}
+                  />
                 </div>
-              </form>
-            </CardContent>
-          </>
-        )}
-      </Card>
+              </div>
+
+              {/* Step 2 Actions */}
+              <div className="pt-3 shrink-0 flex flex-col-reverse sm:flex-row items-stretch justify-between gap-2.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  onClick={() => goToStep(1)}
+                  className="w-full sm:w-auto gap-2 text-sm font-semibold h-11 sm:h-12 px-5 cursor-pointer"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  <span>{t.form.prevStep}</span>
+                </Button>
+
+                <Button
+                  type="submit"
+                  disabled={isScreening || candidates.length === 0}
+                  size="lg"
+                  className="w-full sm:flex-1 gap-2 text-sm sm:text-base font-semibold h-11 sm:h-12 cursor-pointer shadow-sm"
+                >
+                  {isScreening ? (
+                    <div className="flex items-center gap-2">
+                      <ThinkingOrb state="working" size={20} />
+                      <span>{t.form.generatingButton}</span>
+                    </div>
+                  ) : (
+                    <>
+                      <span>{t.form.screenAndReview}</span>
+                      <ArrowRight className="h-4 w-4" />
+                    </>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
 
       {/* STEP 3: AI SCREENING SELECTION & INVITATION HUB */}
       {currentStep === 3 && activeTopCandidate && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 flex-1 w-full min-h-0 items-stretch">
           {/* Left Column (5 cols): Selection Card with Bottom Navigation */}
-          <div className="lg:col-span-5 space-y-4">
-            <Card className="border-border bg-card shadow-xs">
-              <CardContent className="p-4 sm:p-6 space-y-5">
-                {formError && (
-                  <div className="flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs font-medium text-destructive">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <span>{formError}</span>
-                  </div>
-                )}
-
-                {/* Candidate Identity Hero */}
-                <div className="flex items-start justify-between gap-3 border-b border-border/60 pb-4">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground font-bold text-base shadow-sm">
-                      {activeTopCandidate.name.charAt(0)}
+          <div className="lg:col-span-5 flex flex-col gap-4 min-h-0">
+            <Card className="border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
+              <CardContent className="p-4 sm:p-6 flex-1 flex flex-col justify-between space-y-4 min-h-0 overflow-y-auto">
+                <div className="space-y-4">
+                  {formError && (
+                    <div className="flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs font-medium text-destructive shrink-0">
+                      <AlertCircle className="h-4 w-4 shrink-0" />
+                      <span>{formError}</span>
                     </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-base sm:text-lg font-bold text-foreground truncate">
-                          {activeTopCandidate.name}
-                        </h3>
-                        <Badge className="bg-primary hover:bg-primary text-[10px] uppercase font-bold tracking-wider px-1.5 h-4.5 select-none">
-                          {t.form.selectedBadge}
-                        </Badge>
+                  )}
+
+                  {/* Candidate Identity Hero */}
+                  <div className="flex items-start justify-between gap-3 border-b border-border/60 pb-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground font-bold text-base shadow-sm">
+                        {activeTopCandidate.name.charAt(0)}
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                        {jobTitle} • {companyName || 'Technical Role'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <Badge
-                    variant="outline"
-                    className="bg-emerald-500/15 text-emerald-400 border-emerald-500/40 text-xs sm:text-sm font-bold font-mono px-2.5 py-0.5 shrink-0 select-none"
-                  >
-                    {activeTopCandidate.match_score}% Match
-                  </Badge>
-                </div>
-
-                {/* Executive Screening Summary */}
-                <div>
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">
-                    Executive AI Screening Summary
-                  </span>
-                  <div className="rounded-lg bg-muted/40 p-3.5 border border-border/50 text-xs text-foreground leading-relaxed">
-                    {activeTopCandidate.summary}
-                  </div>
-                </div>
-
-                {/* Extracted Competency Highlights */}
-                {activeTopCandidate.strengths && activeTopCandidate.strengths.length > 0 && (
-                  <div className="space-y-2">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground block">
-                      Extracted Competency Highlights
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {activeTopCandidate.strengths.map((str, i) => (
-                        <Badge
-                          key={i}
-                          variant="secondary"
-                          className="text-xs font-normal gap-1 bg-background/80 border border-border/70 select-none"
-                        >
-                          <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-                          {str}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Other Evaluated Applicants Pool */}
-                {activeOtherCandidates.length > 0 && (
-                  <div className="rounded-xl border border-border/80 bg-muted/20 p-3.5 space-y-2.5">
-                    <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground">
-                      <div className="flex items-center gap-1.5">
-                        <Users className="h-3.5 w-3.5" />
-                        <span>Other Applicants in Pool ({activeOtherCandidates.length})</span>
-                      </div>
-                      <span className="text-[10px] text-muted-foreground/80">Click to switch</span>
-                    </div>
-
-                    <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                      {activeOtherCandidates.map((cand, idx) => (
-                        <div
-                          key={idx}
-                          onClick={() => handleSelectCandidate(cand)}
-                          className="group flex items-center justify-between rounded-lg border border-border/70 bg-card hover:bg-accent hover:border-border p-2.5 px-3 text-xs transition-all cursor-pointer select-none"
-                        >
-                          <div className="min-w-0 flex-1 pr-2 select-none">
-                            <span className="font-semibold text-foreground group-hover:text-foreground transition-colors block truncate select-none">
-                              {cand.name}
-                            </span>
-                            <span className="text-[11px] text-muted-foreground transition-colors truncate block select-none">
-                              {cand.strengths?.[0] || 'Applicant profile'}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <Badge
-                              variant="outline"
-                              className="bg-emerald-500/10 group-hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[11px] font-mono select-none transition-colors"
-                            >
-                              {cand.match_score}%
-                            </Badge>
-                            <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-                          </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-base sm:text-lg font-bold text-foreground truncate">
+                            {activeTopCandidate.name}
+                          </h3>
+                          <Badge className="bg-primary hover:bg-primary text-[10px] uppercase font-bold tracking-wider px-1.5 h-4.5 select-none">
+                            {t.form.selectedBadge}
+                          </Badge>
                         </div>
-                      ))}
+                        <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                          {jobTitle} • {companyName || 'Technical Role'}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                )}
 
-                {/* Direct Invite Link */}
-                <div className="rounded-xl border border-border/80 bg-muted/20 p-3.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-foreground select-none">
-                      Direct Invite Link
-                    </span>
-                    <span className="text-[10px] text-muted-foreground select-none">
-                      Share with candidate
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Input
-                      readOnly
-                      value={
-                        createdSession
-                          ? `${window.location.origin}/interview/${createdSession.id}`
-                          : `${window.location.origin}/interview/invite-link`
-                      }
-                      className="h-8.5 text-xs font-mono bg-background text-muted-foreground select-all"
-                    />
-                    <Button
-                      type="button"
+                    <Badge
                       variant="outline"
-                      size="sm"
-                      onClick={handleCopyLink}
-                      disabled={isCopying || isStarting || isLoading}
-                      className="h-8.5 px-3 gap-1.5 text-xs shrink-0 cursor-pointer shadow-2xs min-w-[70px] select-none"
+                      className="bg-emerald-500/15 text-emerald-400 border-emerald-500/40 text-xs sm:text-sm font-bold font-mono px-2.5 py-0.5 shrink-0 select-none"
                     >
-                      {isCopying ? (
+                      {activeTopCandidate.match_score}% Match
+                    </Badge>
+                  </div>
+
+                  {/* Executive Screening Summary */}
+                  <div>
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">
+                      Executive AI Screening Summary
+                    </span>
+                    <div className="rounded-lg bg-muted/40 p-3.5 border border-border/50 text-xs text-foreground leading-relaxed">
+                      {activeTopCandidate.summary}
+                    </div>
+                  </div>
+
+                  {/* Other Evaluated Applicants Pool */}
+                  {activeOtherCandidates.length > 0 && (
+                    <div className="rounded-xl border border-border/80 bg-muted/20 p-3.5 space-y-2.5">
+                      <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground">
                         <div className="flex items-center gap-1.5">
-                          <ThinkingOrb state="connecting" size={20} />
-                          <span>Generating...</span>
+                          <Trophy className="h-3.5 w-3.5 text-amber-500" />
+                          <span>
+                            {t.form.otherApplicants} ({activeOtherCandidates.length})
+                          </span>
                         </div>
-                      ) : isCopied ? (
-                        <>
-                          <Check className="h-3.5 w-3.5 text-emerald-500" />
-                          <span className="text-emerald-500 font-medium">Copied!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="h-3.5 w-3.5" />
-                          <span>Copy</span>
-                        </>
-                      )}
-                    </Button>
+                        <span className="text-[10px] text-muted-foreground/80">
+                          Click to switch
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                        {activeOtherCandidates.map((cand, idx) => (
+                          <div
+                            key={idx}
+                            onClick={() => handleSelectCandidate(cand)}
+                            className="group flex items-center justify-between rounded-lg border border-border/70 bg-card hover:bg-accent hover:border-border p-2.5 px-3 text-xs transition-all cursor-pointer select-none gap-2"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-mono font-bold text-muted-foreground group-hover:bg-primary/20 group-hover:text-primary transition-colors">
+                                #{idx + 2}
+                              </span>
+                              <div className="min-w-0 flex-1 pr-1">
+                                <span className="font-semibold text-foreground group-hover:text-foreground transition-colors block truncate select-none">
+                                  {cand.name}
+                                </span>
+                                <span className="text-[11px] text-muted-foreground transition-colors truncate block select-none">
+                                  {cand.strengths?.[0] || 'Applicant profile'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <Badge
+                                variant="outline"
+                                className="bg-emerald-500/10 group-hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[11px] font-mono select-none transition-colors px-1.5 py-0.5"
+                              >
+                                {cand.match_score}% Match
+                              </Badge>
+                              <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Direct Invite Link */}
+                  <div className="rounded-xl border border-border/80 bg-muted/20 p-3.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-foreground select-none">
+                        Direct Invite Link
+                      </span>
+                      <span className="text-[10px] text-muted-foreground select-none">
+                        Share with candidate
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        readOnly
+                        value={
+                          createdSession
+                            ? `${window.location.origin}/interview/${createdSession.id}`
+                            : `${window.location.origin}/interview/invite-link`
+                        }
+                        className="h-8.5 text-xs font-mono bg-background text-muted-foreground select-all"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleCopyLink}
+                        disabled={isCopying || isStarting || isLoading}
+                        className="h-8.5 px-3 gap-1.5 text-xs shrink-0 cursor-pointer shadow-2xs min-w-[70px] select-none"
+                      >
+                        {isCopying ? (
+                          <div className="flex items-center gap-1.5">
+                            <ThinkingOrb state="connecting" size={20} />
+                            <span>Generating...</span>
+                          </div>
+                        ) : isCopied ? (
+                          <>
+                            <Check className="h-3.5 w-3.5 text-emerald-500" />
+                            <span className="text-emerald-500 font-medium">Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3.5 w-3.5" />
+                            <span>Copy</span>
+                          </>
+                        )}
+                      </Button>
+                    </div>
                   </div>
                 </div>
 
                 {/* Navigation Actions (Bottom bar matching Step 1 & 2 pattern) */}
-                <div className="flex flex-col-reverse sm:flex-row items-center justify-between gap-3 pt-5 border-t border-border mt-5">
+                <div className="flex flex-col-reverse sm:flex-row items-center justify-between gap-3 pt-4 border-t border-border mt-4 shrink-0">
                   <Button
                     type="button"
                     variant="outline"
@@ -903,8 +898,8 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
           </div>
 
           {/* Right Column (7 cols): Separate Dedicated High-Resolution Document Reader */}
-          <div className="lg:col-span-7">
-            <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden flex flex-col h-[780px] lg:h-[820px]">
+          <div className="lg:col-span-7 flex flex-col min-h-0">
+            <div className="rounded-xl border border-border bg-card shadow-xs overflow-hidden flex flex-col flex-1 h-full min-h-[500px] lg:min-h-0">
               {/* Document Header Ribbon */}
               <div className="flex items-center justify-between p-3.5 px-4 border-b border-border/80 bg-muted/40 shrink-0">
                 <div className="flex items-center gap-2.5 min-w-0">
@@ -940,7 +935,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
               <div className="flex-1 overflow-hidden bg-zinc-950/20">
                 {activePdfUrl ? (
                   <iframe
-                    src={activePdfUrl}
+                    src={`${activePdfUrl}#navpanes=0&pagemode=none&toolbar=1&view=FitH`}
                     title={`${activeTopCandidate.name} CV Document`}
                     className="w-full h-full border-none bg-white dark:bg-zinc-900 rounded-b-xl"
                   />
@@ -971,26 +966,6 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                         {activeTopCandidate.summary}
                       </p>
                     </div>
-
-                    {activeTopCandidate.strengths && activeTopCandidate.strengths.length > 0 && (
-                      <div className="space-y-2">
-                        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                          Verified Technical Competencies
-                        </span>
-                        <div className="flex flex-wrap gap-1.5">
-                          {activeTopCandidate.strengths.map((str, i) => (
-                            <Badge
-                              key={i}
-                              variant="secondary"
-                              className="text-xs font-normal gap-1 bg-muted/60 border border-border/80"
-                            >
-                              <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-                              {str}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
 
                     <div className="space-y-2 pt-1">
                       <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">

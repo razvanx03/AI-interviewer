@@ -80,7 +80,7 @@ export const translations = {
       selectedBadge: 'TOP MATCH SELECTED',
       verifiedSkills: 'Verified Competencies',
       screeningVerdict: 'AI Screening Verdict',
-      otherApplicants: 'Other Evaluated Candidates in Pool',
+      otherApplicants: 'Top Candidates Leaderboard',
       shareLinkTip:
         'Share this direct link with the candidate to let them complete the screening independently.',
       validationError: 'Please provide both a Job Title and Job Requirements before proceeding.',
@@ -218,7 +218,7 @@ export const translations = {
       selectedBadge: 'CANDIDAT CÂȘTIGĂTOR SELECTAT',
       verifiedSkills: 'Competențe Verificate',
       screeningVerdict: 'Verdict Evaluare AI',
-      otherApplicants: 'Ceilalți Candidați Evaluați din Grup',
+      otherApplicants: 'Top Candidați (Clasament)',
       shareLinkTip:
         'Trimite acest link direct candidatului pentru a susține interviul independent.',
       validationError:

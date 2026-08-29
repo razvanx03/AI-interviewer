@@ -141,14 +141,14 @@ export const CVUploader: React.FC<CVUploaderProps> = ({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={() => fileInputRef.current?.click()}
-        className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-4 sm:p-5 text-center transition-all ${
+        className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-5 sm:p-7 text-center transition-all ${
           isDragging
             ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
             : 'border-border/80 hover:border-primary/50 hover:bg-muted/30'
         }`}
       >
-        <div className="mb-2 flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-blue-500/15 text-blue-500 dark:text-blue-400 border border-blue-500/30 shadow-2xs">
-          <UploadCloud className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
+        <div className="mb-2.5 flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-full bg-blue-500/15 text-blue-500 dark:text-blue-400 border border-blue-500/30 shadow-2xs">
+          <UploadCloud className="h-5 w-5 sm:h-5.5 sm:w-5.5" />
         </div>
         <p className="text-xs sm:text-sm font-medium text-foreground">
           {t.cvUploader.dragPrompt}{' '}
@@ -161,8 +161,8 @@ export const CVUploader: React.FC<CVUploaderProps> = ({
 
       {/* Queue list of candidates */}
       {candidates.length > 0 && (
-        <div className="space-y-2 pt-1">
-          <div className="flex items-center justify-between px-1">
+        <div className="space-y-2 pt-1 flex-1 flex flex-col min-h-0">
+          <div className="flex items-center justify-between px-1 shrink-0">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
               <Users className="h-3.5 w-3.5 text-blue-500 dark:text-blue-400" />
               <span>{t.form.candidatePoolTitle}</span>
@@ -172,7 +172,7 @@ export const CVUploader: React.FC<CVUploaderProps> = ({
             </Badge>
           </div>
 
-          <div className="grid grid-cols-1 gap-1.5 max-h-56 overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 max-h-72 overflow-y-auto pr-1">
             {candidates.map((cand, idx) => (
               <div
                 key={cand.id || idx}

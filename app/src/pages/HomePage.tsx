@@ -70,9 +70,9 @@ export const HomePage: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Content Form - 3-Step Wizard */}
-      <main className="flex-1 overflow-y-auto p-3 sm:p-6 md:p-8 flex justify-center items-start">
-        <div className="w-full max-w-7xl py-2 sm:py-4 pb-12 transition-all duration-200">
+      {/* Main Content Form - Fullscreen 3-Step Wizard */}
+      <main className="flex-1 flex flex-col min-h-0 overflow-y-auto p-3 sm:p-5 lg:p-6 w-full">
+        <div className="w-full flex-1 flex flex-col min-h-0">
           <CreateInterviewForm
             onCreateSession={handleCreateSession}
             onStartInterview={handleStartInterview}
