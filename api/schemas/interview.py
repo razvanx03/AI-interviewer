@@ -6,6 +6,7 @@ from enum import Enum
 class InterviewStatus(str, Enum):
     DRAFT = "draft"
     ACTIVE = "active"
+    FINISHING = "finishing"
     COMPLETED = "completed"
 
 class ExperienceLevel(str, Enum):

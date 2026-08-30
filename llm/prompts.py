@@ -4,6 +4,7 @@ Optimized for local LLMs (Qwen 3.5 8B) with backend deterministic state machine 
 """
 from typing import List, Dict, Any, Optional
 import json
+import re
 
 SENIORITY_RUBRICS: Dict[str, Dict[str, str]] = {
     "entry": {
@@ -100,6 +101,8 @@ CORE INTERVIEWER DIRECTIVES:
    - You are the INTERVIEWER, never the candidate.
    - When the candidate asks for clarification, NEVER provide the technical solution, database design, architecture, or answers.
    - Clarify only the scope, context, or requirements in 1-2 brief sentences and prompt the candidate to provide their solution.
+6. NO REPETITIVE VOCATIVE OPENERS:
+   - Do NOT start questions by repeating the candidate's name or using identical prefix phrases (e.g. do NOT say 'Spune-mi {candidate_name}, ...', 'Tell me {candidate_name}, ...'). Formulate questions directly and naturally with varied sentence structure.
 """
 
 def build_system_interviewer_prompt(
@@ -131,7 +134,7 @@ def build_system_interviewer_prompt(
             "- The candidate communicates in ROMANIAN (limba română).\n"
             "- Output your entire response in natural, collegial, professional ROMANIAN.\n"
             "- STRICT PRONOUN RULE (PERSOANA A II-A SINGULAR - 'TU'):\n"
-            "  * Adresează-te candidatului direct și natural la persoana a II-a singular ('tu', 'cum ai gestiona', 'ce soluție ai alege', 'spune-mi', 'cum vezi').\n"
+            "  * Adresează-te candidatului direct și natural la persoana a II-a singular ('tu', 'cum ai gestiona', 'ce soluție ai alege', 'cum vezi').\n"
             "  * NU folosi sub nicio formă pluralul de politețe ('dumneavoastră', 'vă rugăm', 'ne spuneți', 'ați înțeles').\n"
             "  * NU folosi persoana a III-a ('ar lua', 'ar face', 'candidatul').\n"
             "  * Fii direct, cald și respectuos de la inginer la inginer.\n"
@@ -298,8 +301,8 @@ Candidate Resume Context: {resume_snippet}
 
 INSTRUCTIONS:
 1. Greet {candidate_name} in 1 short, warm, natural sentence at persoana a II-a singular (e.g. 'Salut {candidate_name}! Mă bucur să ne cunoaștem la interviul tehnic pentru poziția de {job_title} la {effective_company}.').
-2. Immediately ask your FIRST focused technical question in Romanian exploring \"{first_topic}\" tailored to {rubric['title']} level (e.g. 'Pentru început, cum ai aborda...').
-3. REGULĂ DE TON: Folosește EXCLUSIV persoana a II-a singular ('cum ai face', 'ce ai alege', 'spune-mi', NU 'vă rugăm' / 'dumneavoastră' / 'ne spuneți').
+2. Immediately ask your FIRST focused technical question in Romanian exploring \"{first_topic}\" tailored to {rubric['title']} level.
+3. REGULĂ DE TON: Folosește EXCLUSIV persoana a II-a singular ('cum ai face', 'ce ai alege', 'cum vezi', NU 'vă rugăm' / 'dumneavoastră' / 'ne spuneți').
 4. Keep the total message under 3 sentences. Be direct, collegial, and friendly.
 5. Output 100% in natural ROMANIAN (limba română).
 6. Ask strictly ONE clear question. Output ONLY spoken dialogue without quotes or headers."""
@@ -326,74 +329,84 @@ def build_clarification_response_prompt(
     consecutive_clarifications: int = 1,
     clarification_threshold: int = 3,
     language: str = "en",
+    **kwargs: Any,
 ) -> str:
     """
-    Prompt when candidate asks for clarification on the active technical question.
-    Explains the term concisely in 1-2 sentences and seamlessly prompts for candidate's approach.
+    Handle candidate clarification request without answering own question.
     """
     rubric = SENIORITY_RUBRICS.get(experience_level.lower(), SENIORITY_RUBRICS["mid"])
-    is_limit_reached = consecutive_clarifications >= clarification_threshold
 
-    if language == "ro":
-        if is_limit_reached:
-            directive = (
-                f"Candidatul a cerut mai multe clarificări consecutive fără a oferi o soluție tehnică.\n"
-                f"- Spune-i scurt lui {candidate_name} în 1 propoziție la persoana a II-a singular că ai nevoie de perspectiva lui tehnică pentru evaluare.\n"
-                f"- Reia întrebarea activă: \"{active_question_text}\"."
-            )
-        else:
-            directive = (
-                f"Candidatul a pus o întrebare de clarificare: \"{candidate_query}\".\n"
-                f"STRUCTURĂ OBLIGATORIE A RĂSPUNSULUI (2 PAȘI):\n"
-                f"1. Răspunde direct și clar la întrebarea de clarificare a candidatului în 1 propoziție (confirmă sau explică exact la ce te referi din contextul scenariului).\n"
-                f"2. Întreabă-l pe {candidate_name} la persoana a II-a singular cum ar aborda sau implementa el această problemă.\n"
-                f"REGULĂ CRITICĂ: Nu da tu soluția tehnică (nu propune arhitectura, tabele sau algoritmi). Doar clarifică contextul și cere soluția candidatului."
-            )
+    if consecutive_clarifications >= clarification_threshold:
+        if language == "ro":
+            return f"""Ești intervievatorul tehnic pentru rolul de {job_title} ({rubric['title']}).
 
-        return f"""Ești intervievatorul tehnic pentru rolul de {job_title} ({rubric['title']}).
-
-Întrebarea tehnică activă: \"{active_question_text}\"
-Mesajul primit de la {candidate_name}: \"{candidate_query}\"
+Întrebarea tehnică activă: "{active_question_text}"
+Mesajul primit de la {candidate_name}: "{candidate_query}"
 
 DIRECTIVĂ:
-{directive}
+Candidatul a cerut mai multe clarificări consecutive fără a oferi o soluție tehnică.
+Spune-i cu politețe și colegialitate că pentru evaluarea rolului este important să vedem propria sa abordare de rezolvare a problemei și roagă-l să explice cum ar proceda el pe întrebarea activă.
+
+REGULI STRICTE:
+1. Răspunde 100% în LIMBA ROMÂNĂ la PERSOANA A II-A SINGULAR.
+2. FĂRĂ ANTETE SAU ETICHETE. Răspunde direct și natural.
+3. Nu schimba subiectul și nu rezolva problema în locul candidatului.
+4. Output ONLY vorbirea ta directă către {candidate_name}."""
+        else:
+            return f"""You are the technical interviewer for {job_title} ({rubric['title']}).
+
+Active Question: "{active_question_text}"
+Candidate query: "{candidate_query}"
+
+DIRECTIVE:
+The candidate has requested multiple clarifications without proposing a solution.
+Politely and collegially remind them that to properly assess the role, we need to hear their own technical approach. Ask them to explain their strategy for the active question.
+
+CRITICAL RULES:
+1. Output 100% natural, professional ENGLISH.
+2. Do NOT solve the question yourself.
+3. Keep it to 1-2 direct spoken sentences without headers or quotes."""
+
+    if language == "ro":
+        return f"""Ești intervievatorul tehnic pentru rolul de {job_title} ({rubric['title']}).
+
+Întrebarea tehnică activă: "{active_question_text}"
+Mesajul primit de la {candidate_name}: "{candidate_query}"
+
+DIRECTIVĂ:
+Candidatul a pus o întrebare de clarificare: "{candidate_query}".
+STRUCTURĂ OBLIGATORIE A RĂSPUNSULUI (2 PAȘI):
+1. Răspunde direct și clar la întrebarea de clarificare a candidatului în 1 propoziție (confirmă sau explică exact la ce te referi din contextul scenariului).
+2. Întreabă-l pe {candidate_name} la persoana a II-a singular cum ar aborda sau implementa el această problemă.
+REGULĂ CRITICĂ: Nu da tu soluția tehnică (nu propune arhitectura, tabele sau algoritmi). Doar clarifică contextul și cere soluția candidatului.
 
 REGULI STRICTE DE TON ȘI FORMAT:
 1. Răspunde 100% în LIMBA ROMÂNĂ la PERSOANA A II-A SINGULAR ('tu', 'cum ai face', 'ce abordare ai alege').
 2. FĂRĂ ANTETE SAU ETICHETE: Nu scrie 'Clarificare:', 'Răspuns:', 'Întrebare:' sau alte etichete. Răspunde direct și natural.
 3. ESTE STRICT INTERZIS SĂ DAI SOLUȚIA TEHNICĂ: Clarifică doar ce ai întrebat, nu rezolva problema.
 4. Rămâi pe aceeași întrebare activă. Nu trece la o temă nouă.
-5. Output ONLY vorbirea ta directă către {candidate_name}."""
+5. FĂRĂ VOCATIVE REPETITIVE: Nu începe cu 'Spune-mi {candidate_name}' sau repeta numele candidatului la fiecare turn.
+6. Output ONLY vorbirea ta directă către {candidate_name}."""
     else:
-        if is_limit_reached:
-            directive = (
-                f"The candidate has asked multiple consecutive clarifications without providing their technical solution.\n"
-                f"- State in 1 sentence that you need to see their technical perspective for the role.\n"
-                f"- Restate the active question: \"{active_question_text}\"."
-            )
-        else:
-            directive = (
-                f"The candidate asked a clarifying question: \"{candidate_query}\".\n"
-                f"MANDATORY RESPONSE STRUCTURE (2 STEPS):\n"
-                f"1. Directly answer their clarifying question in 1 concise sentence (confirming scope, context, or what scenario you are referring to).\n"
-                f"2. Prompt {candidate_name} to explain how they would solve/handle that scenario.\n"
-                f"CRITICAL: Do NOT provide the technical solution yourself. Only clarify the question context and prompt the candidate for their approach."
-            )
-
         return f"""You are the technical interviewer for {job_title} ({rubric['title']}).
 
-Active Technical Question: \"{active_question_text}\"
-Candidate Message ({candidate_name}): \"{candidate_query}\"
+Active Question: "{active_question_text}"
+Candidate query: "{candidate_query}"
 
 DIRECTIVE:
-{directive}
+The candidate asked for clarification: "{candidate_query}".
+MANDATORY 2-STEP STRUCTURE:
+1. Clarify their specific question concisely in 1 sentence (confirm scope, constraints, or context).
+2. Prompt {candidate_name} for their technical approach to the active question.
+CRITICAL: Do NOT provide the technical solution yourself. Clarify the constraint and ask how they would solve it.
 
 CRITICAL RULES:
-1. Output 100% in ENGLISH.
-2. DO NOT ANSWER YOUR OWN QUESTION: Do NOT provide solutions or design blueprints. Only clarify what the question is asking.
-3. NO HEADERS OR LABELS: Never output labels like 'Clarification:', 'Active question:', or 'Explanation:'. Output direct conversational speech.
-4. Stay on the active question. Do not change the topic.
-5. Output ONLY your spoken dialogue to {candidate_name}."""
+1. Output 100% natural, professional ENGLISH.
+2. NO HEADERS OR LABELS: Do not write 'Clarification:', 'Question:', etc.
+3. NEVER solve the question yourself.
+4. Stay strictly on the active question. Do NOT change topics.
+5. NO REPETITIVE NAME VOCATIVES: Do NOT begin with 'Tell me {candidate_name}'.
+6. Output ONLY your direct spoken dialogue."""
 
 def build_both_response_prompt(
     job_title: str,
@@ -404,90 +417,104 @@ def build_both_response_prompt(
     next_topic: str,
     previous_questions: Optional[List[str]] = None,
     language: str = "en",
+    **kwargs: Any,
 ) -> str:
     """
-    Prompt when candidate both asks a clarification and provides part of an answer.
-    Answers candidate's query in 1 brief sentence, validates their thought, and transitions to next topic.
+    Handle compound candidate message (clarification inquiry + partial answer).
+    Briefly clarify in 1 sentence, acknowledge their insight, and progress to next_topic.
     """
     rubric = SENIORITY_RUBRICS.get(experience_level.lower(), SENIORITY_RUBRICS["mid"])
 
-    anti_rep_ro = ""
-    anti_rep_en = ""
-    if previous_questions:
-        qs = [q.strip() for q in previous_questions if q.strip()][-3:]
-        if qs:
-            formatted_qs = "\n".join(f"- \"{q[:150]}\"" for q in qs)
-            anti_rep_ro = f"\nREGULĂ STRICTĂ ANTI-REPETIȚIE:\nÎntrebările puse anterior:\n{formatted_qs}\n- ESTE STRICT INTERZIS să pui o întrebare similară cu cele de mai sus. Treci la un subiect nou din: \"{next_topic}\".\n"
-            anti_rep_en = f"\nSTRICT ANTI-REPETITION DIRECTIVE:\nPrevious questions:\n{formatted_qs}\n- Do NOT repeat concepts asked above. Switch completely to: \"{next_topic}\".\n"
-
     if language == "ro":
-        return f"""Candidatul ({candidate_name}) a adresat o scurtă întrebare și a oferit și o parte de răspuns tehnic pentru rolul de {job_title} ({rubric['title']}).
+        return f"""Ești intervievatorul tehnic pentru rolul de {job_title} ({rubric['title']}).
 
-Întrebarea activă anterioară: \"{active_question_text}\"
-Mesajul candidatului: \"{candidate_content}\"
-Următoarea competență de evaluat: \"{next_topic}\"
-{anti_rep_ro}
-INSTRUCTIUNI:
-1. Răspunde scurt și direct la întrebarea tehnică a candidatului în 1 propoziție naturală.
-2. Fă o scurtă tranziție organică și continuă direct cu noua întrebare.
-3. Formulează următoarea ta întrebare tehnică axată pe \"{next_topic}\" adaptată nivelului {rubric['title']} (la persoana a II-a singular: 'cum ai gestiona...').
-4. Folosește EXCLUSIV persoana a II-a singular (NU folosi 'vă rugăm' sau 'dumneavoastră').
-5. Output 100% în ROMÂNĂ. O singură întrebare nouă."""
+Întrebarea precedentă: "{active_question_text}"
+Mesajul candidatului ({candidate_name}): "{candidate_content[:500]}"
+Următoarea competență de evaluat: "{next_topic}"
+
+DIRECTIVĂ:
+1. Clarifică pe scurt nelămurirea candidatului și validează în 1 propoziție elementele corecte din răspunsul său.
+2. Treci direct la următoarea întrebare tehnică pe competența: "{next_topic}" la persoana a II-a singular ('cum ai face', 'ce soluție ai alege').
+
+REGULI STRICTE:
+1. Răspunde 100% în LIMBA ROMÂNĂ la PERSOANA A II-A SINGULAR ('tu', 'cum ai face', 'ce soluție ai alege').
+2. FĂRĂ ANTETE, ETICHETE SAU SALUTURI.
+3. Pune o singură întrebare tehnică nouă și clară la nivelul {rubric['title']}.
+4. FĂRĂ VOCATIVE REPETITIVE: Nu începe întrebarea cu 'Spune-mi {candidate_name}'.
+5. Output ONLY vorbirea ta directă."""
     else:
-        return f"""The candidate ({candidate_name}) asked a quick question and provided part of their solution for {job_title}.
+        return f"""You are the technical interviewer for {job_title} ({rubric['title']}).
 
-Candidate Response: \"{candidate_content}\"
-Next Competency to Assess: \"{next_topic}\"
-{anti_rep_en}
-INSTRUCTIONS:
-1. Answer their specific technical question in 1 natural sentence.
-2. Transition smoothly and ask your next focused technical question on \"{next_topic}\" at {rubric['title']} level.
-3. Output 100% in ENGLISH. Strictly one new question."""
+Previous Question: "{active_question_text}"
+Candidate Message ({candidate_name}): "{candidate_content[:500]}"
+Next Competency: "{next_topic}"
+
+DIRECTIVE:
+1. Briefly clarify their inquiry in 1 sentence and acknowledge their technical point.
+2. Ask the next technical question assessing "{next_topic}" at {rubric['title']} level.
+
+CRITICAL RULES:
+1. Output 100% natural, professional ENGLISH.
+2. NO HEADERS, GREETINGS, OR RECAPS.
+3. Formulate strictly ONE focused technical question.
+4. NO REPETITIVE NAME VOCATIVES.
+5. Output ONLY your direct spoken dialogue."""
 
 def build_refusal_response_prompt(
     job_title: str,
     experience_level: str,
     candidate_name: str,
-    skipped_topic: str,
-    next_topic: str,
+    last_topic: Optional[str] = None,
+    skipped_topic: Optional[str] = None,
+    next_topic: str = "",
+    candidate_message: Optional[str] = None,
     previous_questions: Optional[List[str]] = None,
     language: str = "en",
+    **kwargs: Any,
 ) -> str:
     """
-    Prompt when candidate says 'I don't know / skip / haven't worked with this'.
-    Supportively acknowledges in 1 sentence and transitions to the next topic.
+    Handle candidate saying 'I don't know / haven't worked with this / skip'.
+    Acknowledge supportively without awkwardness and pivot directly to next_topic.
     """
     rubric = SENIORITY_RUBRICS.get(experience_level.lower(), SENIORITY_RUBRICS["mid"])
-
-    anti_rep_ro = ""
-    anti_rep_en = ""
-    if previous_questions:
-        qs = [q.strip() for q in previous_questions if q.strip()][-3:]
-        if qs:
-            formatted_qs = "\n".join(f"- \"{q[:150]}\"" for q in qs)
-            anti_rep_ro = f"\nREGULĂ STRICTĂ ANTI-REPETIȚIE (CRITICĂ):\nÎntrebările puse anterior au fost:\n{formatted_qs}\n- ESTE STRICT INTERZIS să pui o întrebare pe același concept/tehnologie ca mai sus sau să reformulezi întrebarea anterioară!\n- Candidatul a cerut să treacă peste. Schimbă COMPLET subiectul către noua temă \"{next_topic}\".\n"
-            anti_rep_en = f"\nSTRICT ANTI-REPETITION DIRECTIVE (CRITICAL):\nPrevious questions asked:\n{formatted_qs}\n- NEVER repeat or rephrase questions about concepts/technologies asked above!\n- Completely change the topic to focus exclusively on the new pillar: \"{next_topic}\".\n"
+    effective_topic = skipped_topic or last_topic or "the previous topic"
+    effective_msg = candidate_message or "Nu am lucrat cu acest aspect / skip."
 
     if language == "ro":
-        return f"""Candidatul ({candidate_name}) a menționat că nu cunoaște sau dorește să treacă peste tema \"{skipped_topic}\".
+        return f"""Ești intervievatorul tehnic pentru rolul de {job_title} ({rubric['title']}).
 
-Următoarea competență tehnică: \"{next_topic}\"
-{anti_rep_ro}
-INSTRUCTIUNI:
-1. Fă o scurtă tranziție naturală și degajată (1 propoziție scurtă la persoana a II-a singular) sau treci direct mai departe, fără formule rigide de tip șablon.
-2. Treci la următoarea competență tehnică \"{next_topic}\" și pune o întrebare clară adaptată pentru {rubric['title']} la persoana a II-a singular ('cum ai proceda dacă...').
-3. Întrebarea trebuie să fie pe un subiect tehnic complet diferit de cele anterioare.
-4. Folosește EXCLUSIV persoana a II-a singular (NU 'dumneavoastră' / 'vă rugăm').
-5. Output 100% în ROMÂNĂ. O singură întrebare nouă."""
+Tema precedentă: "{effective_topic}"
+Mesajul candidatului ({candidate_name}): "{effective_msg}"
+Următoarea competență tehnică: "{next_topic}"
+
+DIRECTIVĂ:
+Candidatul a menționat că nu cunoaște sau nu a lucrat cu acest aspect, ori a cerut să trecem mai departe.
+1. Confirmă calm și colegial în 1 propoziție scurtă (ex: 'Nicio problemă, este în regulă!' sau 'Înțeles, mergem mai departe.').
+2. Formulează direct următoarea întrebare tehnică pe competența: "{next_topic}".
+
+REGULI STRICTE:
+1. Răspunde 100% în LIMBA ROMÂNĂ la PERSOANA A II-A SINGULAR.
+2. FĂRĂ SALUTURI ȘI FĂRĂ ETICHETE.
+3. Pune o singură întrebare tehnică clară la nivelul {rubric['title']}.
+4. FĂRĂ FORMULE REPETITIVE (nu începe cu 'Spune-mi {candidate_name}').
+5. Output ONLY vorbirea ta directă."""
     else:
-        return f"""The candidate ({candidate_name}) stated they don't know or haven't worked with \"{skipped_topic}\".
+        return f"""You are the technical interviewer for {job_title} ({rubric['title']}).
 
-Next Technical Competency: \"{next_topic}\"
-{anti_rep_en}
-INSTRUCTIONS:
-1. Make a brief, natural transition (or move directly to the new topic) without rigid repetitive templates.
-2. Introduce the next technical competency \"{next_topic}\" and ask a focused question at {rubric['title']} level.
-3. Output 100% in ENGLISH. Strictly one new question."""
+Previous Topic: "{effective_topic}"
+Candidate Message ({candidate_name}): "{effective_msg}"
+Next Competency: "{next_topic}"
+
+DIRECTIVE:
+The candidate indicated they have not worked with this or asked to skip.
+1. Acknowledge supportively in 1 short sentence (e.g. 'No problem at all!' or 'Understood, let us move forward.').
+2. Directly ask the next technical question covering "{next_topic}" at {rubric['title']} level.
+
+CRITICAL RULES:
+1. Output 100% natural, professional ENGLISH.
+2. NO GREETINGS, LABELS, OR METATAGS.
+3. Formulate strictly ONE focused technical question.
+4. Output ONLY your direct spoken dialogue."""
 
 def build_next_question_prompt(
     job_title: str,
@@ -509,17 +536,19 @@ def build_next_question_prompt(
 
     if is_final_wrap_up:
         if language == "ro":
-            return f"""Interviul tehnic cu {candidate_name} pentru rolul de {job_title} s-a încheiat cu succes.
+            return f"""Interviul tehnic cu {candidate_name} pentru rolul de {job_title} s-a încheiat complet.
 
-INSTRUCTIUNI:
-1. Scrie un mesaj călduros, colegial și profesional de încheiere și mulțumire către {candidate_name} în limba română la persoana a II-a singular (ex: 'Îți mulțumesc pentru răspunsuri și pentru discuția deschisă!').
-2. La finalul absolut al mesajului adaugă exact tokenul: [INTERVIEW_COMPLETE]"""
+INSTRUCȚIUNI:
+1. Scrie un mesaj scurt, călduros și profesional de încheiere și mulțumire către {candidate_name} în limba română la persoana a II-a singular.
+2. REGULĂ CRITICĂ: Chatul se oprește definitiv aici. ESTE STRICT INTERZIS să inviți candidatul să pună întrebări sau să continue discuția (NU spune 'dacă ai întrebări', 'nu ezita să-mi spui', 'aștept mesajul tău'). Spune doar că interviul a ajuns la final, mulțumește-i pentru timp și participare și urează-i mult succes!
+3. La finalul absolut al mesajului adaugă exact tokenul: [INTERVIEW_COMPLETE]"""
         else:
-            return f"""The technical interview with {candidate_name} for {job_title} is complete.
+            return f"""The technical interview with {candidate_name} for {job_title} is completely finished.
 
 INSTRUCTIONS:
-1. Write a warm, professional closing thank-you message to {candidate_name} in English.
-2. At the very end of your message, append the exact token: [INTERVIEW_COMPLETE]"""
+1. Write a concise, warm, and professional closing thank-you message to {candidate_name} in English.
+2. CRITICAL RULE: The chat session terminates immediately here. Do NOT invite the candidate to ask questions or reply (do NOT say 'feel free to ask', 'if you have questions', or 'let me know'). Simply thank them for their time and participation, and wish them the best of luck.
+3. At the very end of your message, append the exact token: [INTERVIEW_COMPLETE]"""
 
     anti_rep_ro = ""
     anti_rep_en = ""
@@ -536,44 +565,43 @@ INSTRUCTIONS:
             if is_follow_up
             else f"Treci direct la următoarea competență tehnică: \"{next_topic}\"."
         )
-        return f"""Ești intervievatorul tehnic pentru rolul de {job_title} ({rubric['title']}).
+        return f"""Ești INTERVIEVATORUL TEHNIC (angajatorul) pentru rolul de {job_title} ({rubric['title']}).
 
-Răspunsul candidatului ({candidate_name}):
+Răspunsul oferit anterior de candidat ({candidate_name}):
 \"{candidate_answer[:500]}\"
 
-Competență tehnică vizată: \"{next_topic}\"
+Competență tehnică vizată pentru următoarea întrebare: \"{next_topic}\"
 {anti_rep_ro}
 DIRECTIVĂ:
 {follow_up_hint}
 
-REGULI DE TON ȘI GRAMATICĂ ÎN LIMBA ROMÂNĂ (CRITICE):
-1. FĂRĂ SALUTURI: Nu saluta (nu spune 'Salut!', 'Bună!' etc.) — interviul este deja în plină desfășurare.
-2. FĂRĂ RECAPITULĂRI: Nu rezuma și nu repeta ce a spus candidatul. Treci direct la întrebarea tehnică.
-3. PERSOANA A II-A SINGULAR EXCLUSIV: Folosește exclusiv 'tu' ('cum ai face', 'ce soluție ai alege', 'cum ai gestiona'). Este strict interzis pluralul ('arătați', 'spuneți') sau persoana a III-a ('ar aborda').
-4. ACORD GRAMATICAL CORECT: Respectă genul corect al substantivelor ('un scenariu', 'un sistem', 'o structură').
-5. STRICT O SINGURĂ ÎNTREBARE: Pune o singură întrebare clară, practică și concretă.
-6. FĂRĂ ETICHETE SAU PREFIXE: Output 100% vorbire directă fluidă în limba română."""
+REGULI CRITICE (OBLIGATORII):
+1. TU EȘTI EXCLUSIV INTERVIEVATORUL: Este STRICT INTERZIS să oferi soluții tehnice, să răspunzi la întrebare sau să vorbești din perspectiva 'Aș folosi...', 'Aș face...', 'Aplicația va...'. ROLUL TĂU ESTE DOAR SĂ PUI O NOUĂ ÎNTREBARE TEHNICĂ CĂTRE CANDIDAT.
+2. FĂRĂ SALUTURI SAU RECAPITULĂRI: Nu saluta ('Salut', 'Bună') și nu rezuma ce a zis candidatul. Formulează direct întrebarea tehnică.
+3. PERSOANA A II-A SINGULAR EXCLUSIV: Adresează-te candidatului cu 'tu' ('Cum ai gestiona...', 'Ce abordare ai alege...').
+4. STRICT O SINGURĂ ÎNTREBARE TEHNICĂ: Output-ul tău trebuie să fie STRICT o întrebare tehnică care se termină obligatoriu cu semnul întrebării (?).
+5. ZERO OBSERVAȚII SAU META-COMENTARII: Este STRICT INTERZIS să adaugi 'Observație:', 'Notă:', 'Explicație:' sau comentarii despre întrebare. Output-ul tău este doar textul întrebării."""
     else:
         follow_up_hint = (
             "Ask a focused follow-up technical question delving deeper into their answer."
             if is_follow_up
             else f"Transition directly to the next technical competency: \"{next_topic}\"."
         )
-        return f"""You are the technical interviewer for {job_title} ({rubric['title']}).
+        return f"""You are the TECHNICAL INTERVIEWER (the employer) for {job_title} ({rubric['title']}).
 
 Candidate Answer ({candidate_name}):
 \"{candidate_answer[:500]}\"
 
-Target Competency: \"{next_topic}\"
+Target Competency for next question: \"{next_topic}\"
 {anti_rep_en}
 DIRECTIVE:
 {follow_up_hint}
 
-CRITICAL RULES:
-1. NO GREETINGS: Do not greet again (no 'Hi', 'Hello') — the interview is already in progress.
-2. NO RECAPS: Do not summarize or recap previous answers. Go straight to the technical question.
-3. STRICT SINGLE QUESTION: Formulate strictly ONE practical, well-structured technical question at {rubric['title']} level.
-4. NO HEADERS OR PREFIXES: Output 100% natural conversational English."""
+CRITICAL RULES (MANDATORY):
+1. YOU ARE STRICTLY THE INTERVIEWER: You are NEVER the candidate. It is STRICTLY FORBIDDEN to provide technical solutions or speak from candidate perspective (do NOT say 'I would use...', 'The app will...'). Your ONLY task is to ASK a new technical question.
+2. NO GREETINGS OR RECAPS: Do not greet and do not summarize previous answers. Go straight to the technical question.
+3. STRICT SINGLE QUESTION: Formulate strictly ONE practical technical question ending with a question mark (?).
+4. ZERO META-OBSERVATIONS OR NOTES: It is STRICTLY FORBIDDEN to add 'Note:', 'Observation:', 'Explanation:' or commentary about the question. Output ONLY direct speech to the candidate."""
 
 def build_conversation_summary_prompt(
     job_title: str,
@@ -743,6 +771,112 @@ OUTPUT FORMAT (valid JSON ONLY):
   "summary": "<concise 2-3 sentence honest hiring assessment of candidate's answers against {rubric['title']} level>"
 }}"""
 
+def is_wrapup_or_evaluation_message(content: str) -> bool:
+    """Check if an assistant message is an interview closing/thank-you message rather than a technical question."""
+    lower = content.lower().strip()
+    if "[interview_complete]" in lower:
+        return True
+    if "**overall ai assessment:" in lower or "**evaluare generală ai:" in lower or "**evaluare generala ai:" in lower:
+        return True
+
+    closing_indicators = [
+        r"\b(iti\s+multumesc|va\s+multumesc|iti\s+multumim|va\s+multumim|multumim|thank\s+you)\b",
+        r"\b(interviul\s+(tehnic\s+)?s-?a\s+(incheiat|luat\s+sfarsit)|sesiunea\s+de\s+interviu\s+s-?a\s+(incheiat|luat\s+sfarsit)|interview\s+is\s+complete|interview\s+has\s+concluded)\b",
+        r"\b(vom\s+reveni\s+cu\s+un\s+feedback|the\s+recruitment\s+team\s+will\s+review|transcrierea\s+a\s+fost\s+inregistrata|transcript\s+has\s+been\s+recorded)\b",
+        r"\b(evaluare\s+generala|overall\s+ai\s+assessment|recruiter\s+evaluation|puncte\s+forte|arii\s+de\s+imbunatatire|key\s+strengths)\b",
+    ]
+    return any(re.search(pat, lower) for pat in closing_indicators)
+
+
+def is_clarification_user_query(content: str) -> bool:
+    """Check if a user message is an inquiry/clarification rather than a final substantive technical answer."""
+    lower = content.lower().strip()
+    replacements = {'ă': 'a', 'â': 'a', 'î': 'i', 'ș': 's', 'ş': 's', 'ț': 't', 'ţ': 't'}
+    for k, v in replacements.items():
+        lower = lower.replace(k, v)
+
+    has_substantive = bool(re.search(
+        r"\b(as\s+folosi|as\s+alege|as\s+face|as\s+implementa|as\s+crea|pentru\s+ca|deoarece|in\s+schimb|i\s+would|because|i\s+prefer|my\s+solution|implementing|using|solutia\s+mea)\b",
+        lower
+    )) and len(lower.split()) >= 15
+    if has_substantive:
+        return False
+
+    clarification_patterns = [
+        r"\b(nu\s+inteleg|nu\s+prea\s+inteleg|nu\s+am\s+inteles|i\s+don'?t\s+understand)\b",
+        r"\b(poti\s+(sa\s+)?(clarifici|clarifica|reformulezi|detaliezi|explici)|could\s+you\s+(clarify|rephrase|explain)|can\s+you\s+(clarify|rephrase|explain))\b",
+        r"\b(clarifica|clarificare|rephrase|clarify|detaliaza)\b",
+        r"\b(nu\s+(imi\s+)?e(ste)?\s+(foarte\s+)?clar|it'?s\s+not\s+clear|not\s+very\s+clear|unclear)\b",
+        r"\b(la\s+ce\s+te\s+referi|what\s+do\s+you\s+mean|what\s+does\s+that\s+mean|ce\s+vrei\s+sa\s+spui|ce\s+ai\s+vrea)\b",
+        r"\b(ce\s+inseamna|ce\s+e\s+aia|ce\s+este|ce\s+reprezinta|what\s+is|what\s+does\s+.*\s+mean|what\s+are)\b",
+        r"\b(te\s+referi\s+la|do\s+you\s+mean|ce\s+parte|care\s+dintre|sau\s+ambele|despre\s+ce|ce\s+anume)\b",
+        r"\b(pot\s+folosi|pot\s+sa\s+folosesc|can\s+i\s+use|should\s+i\s+use|is\s+it\s+allowed|avem\s+voie)\b",
+        r"\b(junior|mid|senior|lead|nivelul|standardul)\b",
+    ]
+    if any(re.search(pat, lower) for pat in clarification_patterns):
+        return True
+    if "?" in lower and not has_substantive:
+        return True
+    return False
+
+
+def parse_transcript_into_qa_rounds(transcript: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    """Parse chronological transcript messages into cohesive structured Q&A rounds."""
+    rounds: List[Dict[str, Any]] = []
+    current_q: Optional[str] = None
+    clarifications_for_current_q: List[str] = []
+    round_idx = 1
+
+    for msg in transcript:
+        role = msg.get("role")
+        content = msg.get("content", "").strip()
+        if not content:
+            continue
+
+        if role in ["assistant", "system"]:
+            if is_wrapup_or_evaluation_message(content):
+                continue
+
+            if current_q is not None and clarifications_for_current_q:
+                # Assistant clarifying in response to candidate's inquiry
+                pass
+            else:
+                current_q = content
+                clarifications_for_current_q = []
+
+        elif role == "user":
+            if current_q is not None:
+                if is_clarification_user_query(content):
+                    clarifications_for_current_q.append(content)
+                else:
+                    answer_text = content
+                    if clarifications_for_current_q:
+                        clarif_summary = "; ".join(f'"{c}"' for c in clarifications_for_current_q)
+                        answer_text = f"{content}\n[Clarification Context: Candidate proactively clarified: {clarif_summary} prior to solving.]"
+
+                    rounds.append({
+                        "question_id": round_idx,
+                        "question": current_q,
+                        "answer": answer_text,
+                    })
+                    current_q = None
+                    clarifications_for_current_q = []
+                    round_idx += 1
+            else:
+                if rounds:
+                    rounds[-1]["answer"] += f"\n[Additional Follow-up Response]: {content}"
+
+    if current_q is not None and not is_wrapup_or_evaluation_message(current_q):
+        if "?" in current_q and len(current_q.split()) > 6:
+            rounds.append({
+                "question_id": round_idx,
+                "question": current_q,
+                "answer": "[NO RESPONSE PROVIDED - CANDIDATE CONCLUDED SESSION WITHOUT ANSWERING]",
+            })
+
+    return rounds
+
+
 def build_evaluation_report_prompt(
     job_title: str,
     job_description: str,
@@ -758,38 +892,16 @@ def build_evaluation_report_prompt(
     """Prompt to evaluate a standard-length interview transcript fairly."""
     rubric = SENIORITY_RUBRICS.get(experience_level.lower(), SENIORITY_RUBRICS["mid"])
 
+    qa_rounds_struct = parse_transcript_into_qa_rounds(transcript)
     qa_rounds = []
-    current_interviewer_q = None
-    round_idx = 1
-
-    for msg in transcript:
-        role = msg.get("role")
-        content = msg.get("content", "").strip()
-        if not content:
-            continue
-
-        if role in ["assistant", "system"]:
-            if "Thank you for completing your interview" in content or "**Overall AI Assessment:" in content or "**Evaluare Generală AI:" in content:
-                continue
-            current_interviewer_q = content
-        elif role == "user":
-            if current_interviewer_q is not None:
-                qa_rounds.append(
-                    f"EXCHANGE ROUND #{round_idx}:\n"
-                    f"  [QUESTION ASKED BY INTERVIEWER]: \"{current_interviewer_q}\"\n"
-                    f"  [CANDIDATE'S ACTUAL RESPONSE]: \"{content}\"\n"
-                )
-                current_interviewer_q = None
-                round_idx += 1
-            else:
-                if qa_rounds:
-                    qa_rounds[-1] += f"  [ADDITIONAL CANDIDATE MESSAGE]: \"{content}\"\n"
-
-    if current_interviewer_q is not None:
+    for r in qa_rounds_struct:
+        qid = r.get("question_id", 1)
+        q = r.get("question", "")
+        a = r.get("answer", "")
         qa_rounds.append(
-            f"EXCHANGE ROUND #{round_idx}:\n"
-            f"  [QUESTION ASKED BY INTERVIEWER]: \"{current_interviewer_q}\"\n"
-            f"  [CANDIDATE'S ACTUAL RESPONSE]: \"[NO RESPONSE PROVIDED - CANDIDATE CONCLUDED SESSION WITHOUT ANSWERING]\"\n"
+            f"EXCHANGE ROUND #{qid}:\n"
+            f"  [QUESTION ASKED BY INTERVIEWER]: \"{q}\"\n"
+            f"  [CANDIDATE'S ACTUAL RESPONSE]: \"{a}\"\n"
         )
 
     formatted_qa_transcript = "\n".join(qa_rounds) if qa_rounds else "No interview exchanges recorded."

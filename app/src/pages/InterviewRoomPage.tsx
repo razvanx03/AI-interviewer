@@ -36,26 +36,48 @@ export const InterviewRoomPage: React.FC = () => {
   const [showFinishDialog, setShowFinishDialog] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
   const isEndingRef = useRef(false);
+  const hasInitializedLangRef = useRef<string | null>(null);
+  const autoEvaluatedSessionsRef = useRef<Set<string>>(new Set());
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
 
+  const handleLanguageChange = (lang: 'en' | 'ro') => {
+    setLanguage(lang);
+    if (activeSession && activeSession.language !== lang) {
+      const updated: InterviewSession = { ...activeSession, language: lang };
+      setActiveSession(updated);
+      updateInterview(updated);
+    }
+  };
+
   const handleEndInterview = useCallback(async () => {
-    if (!activeSession || activeSession.status === 'completed' || isEndingRef.current) return;
+    if (
+      !activeSession ||
+      activeSession.status === 'completed' ||
+      activeSession.status === 'finishing' ||
+      isEndingRef.current
+    )
+      return;
     isEndingRef.current = true;
     setIsEnding(true);
+
+    // Optimistically update status to 'finishing' so Finish button disappears immediately!
+    const optimistic: InterviewSession = {
+      ...activeSession,
+      status: 'finishing',
+      updatedAt: new Date().toISOString(),
+    };
+    autoEvaluatedSessionsRef.current.add(activeSession.id);
+    setActiveSession(optimistic);
+    updateInterview(optimistic);
+
     try {
       const updated = await apiCompleteInterview(activeSession.id);
       if (updated) {
         setActiveSession(updated);
         updateInterview(updated);
-      } else {
-        const fallback: InterviewSession = {
-          ...activeSession,
-          status: 'completed',
-          updatedAt: new Date().toISOString(),
-        };
-        setActiveSession(fallback);
-        updateInterview(fallback);
       }
+    } catch (err) {
+      console.error('Failed to complete interview:', err);
     } finally {
       setIsEnding(false);
       isEndingRef.current = false;
@@ -86,7 +108,12 @@ export const InterviewRoomPage: React.FC = () => {
         if (fresh) {
           setActiveSession(fresh);
           setIsNotFound(false);
-          if (fresh.language && (fresh.language === 'ro' || fresh.language === 'en')) {
+          if (
+            hasInitializedLangRef.current !== fresh.id &&
+            fresh.language &&
+            (fresh.language === 'ro' || fresh.language === 'en')
+          ) {
+            hasInitializedLangRef.current = fresh.id;
             setLanguage(fresh.language);
           }
         } else {
@@ -110,7 +137,11 @@ export const InterviewRoomPage: React.FC = () => {
 
   // Live Timer Countdown Effect
   useEffect(() => {
-    if (!activeSession?.timeLimitMinutes || activeSession.status === 'completed') {
+    if (
+      !activeSession?.timeLimitMinutes ||
+      activeSession.status === 'completed' ||
+      activeSession.status === 'finishing'
+    ) {
       setRemainingSeconds(null);
       return;
     }
@@ -159,19 +190,40 @@ export const InterviewRoomPage: React.FC = () => {
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
-  // Auto-generate / fetch evaluation report for Admin on completed session if not present
+  // Intelligent Polling for Finishing / Completed Sessions without evaluation
   useEffect(() => {
-    if (!isAdmin || !activeSession || activeSession.status !== 'completed' || isEndingRef.current) {
+    if (
+      !id ||
+      !activeSession ||
+      (activeSession.status !== 'finishing' && activeSession.status !== 'completed')
+    ) {
       return;
     }
-    const hasEval = activeSession.messages.some(
-      (m) =>
-        m.role === 'assistant' &&
-        (m.content.includes('**Overall AI Assessment:') ||
-          m.content.includes('**Evaluare Generală AI:'))
-    );
-    if (!hasEval) {
-      isEndingRef.current = true;
+
+    const hasEval = activeSession.messages.some((m) => {
+      if (m.role !== 'assistant') return false;
+      const c = m.content.toLowerCase();
+      return (
+        c.includes('overall ai assessment') ||
+        c.includes('evaluare general') ||
+        c.includes('recruiter evaluation report') ||
+        c.includes('arii de îmbunătățire') ||
+        c.includes('arii de imbunatatire') ||
+        c.includes('areas for improvement')
+      );
+    });
+
+    if (activeSession.status === 'completed' && hasEval) {
+      return;
+    }
+
+    // If session is finishing/completed without eval, trigger complete if not already requested
+    if (
+      !hasEval &&
+      !autoEvaluatedSessionsRef.current.has(activeSession.id) &&
+      !isEndingRef.current
+    ) {
+      autoEvaluatedSessionsRef.current.add(activeSession.id);
       setIsEnding(true);
       apiCompleteInterview(activeSession.id)
         .then((updated) => {
@@ -182,10 +234,46 @@ export const InterviewRoomPage: React.FC = () => {
         })
         .finally(() => {
           setIsEnding(false);
-          isEndingRef.current = false;
         });
     }
-  }, [isAdmin, activeSession, updateInterview]);
+
+    let isPolling = true;
+    const interval = setInterval(async () => {
+      try {
+        const fresh = await apiGetInterview(id);
+        if (!isPolling || !fresh) return;
+        const freshHasEval = fresh.messages.some((m) => {
+          if (m.role !== 'assistant') return false;
+          const c = m.content.toLowerCase();
+          return (
+            c.includes('overall ai assessment') ||
+            c.includes('evaluare general') ||
+            c.includes('recruiter evaluation report')
+          );
+        });
+
+        if (fresh.status === 'completed' && freshHasEval) {
+          setActiveSession(fresh);
+          updateInterview(fresh);
+          setIsEnding(false);
+          clearInterval(interval);
+        } else if (
+          fresh.status !== activeSession.status ||
+          fresh.messages.length !== activeSession.messages.length
+        ) {
+          setActiveSession(fresh);
+          updateInterview(fresh);
+        }
+      } catch (err) {
+        console.error('Polling for completed evaluation report failed:', err);
+      }
+    }, 2500);
+
+    return () => {
+      isPolling = false;
+      clearInterval(interval);
+    };
+  }, [id, isAdmin, activeSession, updateInterview]);
 
   // Dynamic Browser Title
   useEffect(() => {
@@ -369,14 +457,14 @@ export const InterviewRoomPage: React.FC = () => {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-36">
                   <DropdownMenuItem
-                    onClick={() => setLanguage('en')}
+                    onClick={() => handleLanguageChange('en')}
                     className="flex items-center justify-between text-xs cursor-pointer"
                   >
                     <span>English</span>
                     {language === 'en' && <Check className="h-3.5 w-3.5 text-primary" />}
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    onClick={() => setLanguage('ro')}
+                    onClick={() => handleLanguageChange('ro')}
                     className="flex items-center justify-between text-xs cursor-pointer"
                   >
                     <span>Română</span>
@@ -390,7 +478,7 @@ export const InterviewRoomPage: React.FC = () => {
           )}
 
           {/* Finish Button */}
-          {activeSession.status !== 'completed' && (
+          {activeSession.status === 'active' && (
             <Button
               variant="secondary"
               size="sm"
@@ -416,12 +504,21 @@ export const InterviewRoomPage: React.FC = () => {
             >
               {t.header.completed}
             </Badge>
+          ) : activeSession.status === 'finishing' ? (
+            <Badge
+              variant="outline"
+              className="border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[10px] sm:text-xs font-medium px-2 py-0.5 h-8 gap-1.5"
+            >
+              <ThinkingOrb state="working" size={20} />
+              <span>{language === 'ro' ? 'Finalizare...' : 'Finishing...'}</span>
+            </Badge>
           ) : (
             <Badge
               variant="outline"
-              className="border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[10px] sm:text-xs font-medium px-2 py-0.5 h-8"
+              className="border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] sm:text-xs font-medium px-2 py-0.5 h-8 gap-1.5"
             >
-              {t.header.live}
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>{t.header.live}</span>
             </Badge>
           )}
         </div>

@@ -372,22 +372,40 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
           )}
 
           {/* Completed Interview Banner or Admin Generating Card */}
-          {session.status === 'completed' &&
+          {(session.status === 'completed' || session.status === 'finishing') &&
             (isAdmin &&
-            (isEnding || !session.messages.some((m) => parseMessageEvaluation(m).hasEvaluation)) ? (
+            (isEnding ||
+              session.status === 'finishing' ||
+              !session.messages.some((m) => parseMessageEvaluation(m).hasEvaluation)) ? (
               <div className="my-4 sm:my-6 rounded-xl border border-primary/40 bg-card p-5 sm:p-6 shadow-sm space-y-3 text-center animate-pulse">
                 <div className="mx-auto mb-2 flex items-center justify-center">
                   <ThinkingOrb state="working" size={64} />
                 </div>
                 <h4 className="text-sm sm:text-base font-bold text-foreground">
                   {session.language === 'ro'
-                    ? 'Sesiune Finalizată • Se generează raportul de evaluare...'
-                    : 'Session Completed • Generating Evaluation Report...'}
+                    ? 'Sesiune în Curs de Finalizare • Se generează raportul de evaluare...'
+                    : 'Finalizing Interview Session • Generating Evaluation Report...'}
                 </h4>
                 <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
                   {session.language === 'ro'
                     ? 'AI-ul analizează transcrierea completă a răspunsurilor și sintetizează scorurile tehnice, punctele forte și ariile de îmbunătățire.'
                     : 'The AI is analyzing the full interview transcript and synthesizing technical scores, strengths, and areas for improvement.'}
+                </p>
+              </div>
+            ) : session.status === 'finishing' ? (
+              <div className="my-4 sm:my-6 rounded-xl border border-amber-500/40 bg-card p-5 sm:p-6 shadow-sm space-y-3 text-center animate-pulse">
+                <div className="mx-auto mb-2 flex items-center justify-center">
+                  <ThinkingOrb state="working" size={64} />
+                </div>
+                <h4 className="text-sm sm:text-base font-bold text-foreground">
+                  {session.language === 'ro'
+                    ? 'Sesiune în Curs de Finalizare...'
+                    : 'Finalizing Interview Session...'}
+                </h4>
+                <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
+                  {session.language === 'ro'
+                    ? 'Îți mulțumim pentru participare! Raportul tău tehnic este în curs de înregistrare.'
+                    : 'Thank you for participating! Your technical assessment is being finalized.'}
                 </p>
               </div>
             ) : (
@@ -407,82 +425,87 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       </div>
 
       {/* Docked Bottom Area */}
-      <div className="border-t border-border bg-card/60 p-3 sm:p-4 backdrop-blur">
-        <div className="mx-auto max-w-3xl">
-          {isEnding ? (
-            <div className="flex items-center justify-center gap-2.5 py-3 text-xs text-muted-foreground animate-pulse">
-              <ThinkingOrb state="working" size={20} />
-              <span>
-                {t.header?.endingText || 'Generating final technical evaluation & hiring report...'}
-              </span>
-            </div>
-          ) : session.status === 'completed' ? (
-            <div className="flex items-center justify-center gap-2 py-3 text-xs text-muted-foreground">
-              <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-              <span>{t.chat.concludedText}</span>
-            </div>
-          ) : isAdmin ? (
-            /* RECRUITER / ADMIN VIEW: READ-ONLY OBSERVATION */
-            <div className="flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl border border-primary/20 bg-primary/5 text-xs text-muted-foreground font-medium select-none">
-              <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
-              <span>
-                Recruiter Observation Mode: You are viewing the live transcript. The candidate has
-                active interactive access.
-              </span>
-            </div>
-          ) : (
-            /* CANDIDATE INTERACTIVE INPUT */
-            <div className="space-y-2">
-              {streamError && (
-                <div className="flex items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-2.5 px-3 text-xs text-destructive">
-                  <span className="truncate">Connection error: {streamError}</span>
+      {(!isAdmin ||
+        (session.status !== 'completed' && session.status !== 'finishing') ||
+        isEnding) && (
+        <div className="border-t border-border bg-card/60 p-3 sm:p-4 backdrop-blur">
+          <div className="mx-auto max-w-3xl">
+            {isEnding || session.status === 'finishing' ? (
+              <div className="flex items-center justify-center gap-2.5 py-3 text-xs text-muted-foreground animate-pulse">
+                <ThinkingOrb state="working" size={20} />
+                <span>
+                  {t.header?.endingText ||
+                    'Generating final technical evaluation & hiring report...'}
+                </span>
+              </div>
+            ) : session.status === 'completed' ? (
+              <div className="flex items-center justify-center gap-2 py-3 text-xs text-muted-foreground">
+                <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                <span>{t.chat.concludedText}</span>
+              </div>
+            ) : isAdmin ? (
+              /* RECRUITER / ADMIN VIEW: READ-ONLY OBSERVATION */
+              <div className="flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl border border-primary/20 bg-primary/5 text-xs text-muted-foreground font-medium select-none">
+                <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
+                <span>
+                  Recruiter Observation Mode: You are viewing the live transcript. The candidate has
+                  active interactive access.
+                </span>
+              </div>
+            ) : (
+              /* CANDIDATE INTERACTIVE INPUT */
+              <div className="space-y-2">
+                {streamError && (
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-2.5 px-3 text-xs text-destructive">
+                    <span className="truncate">Connection error: {streamError}</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        const lastUserMsg = [...session.messages]
+                          .reverse()
+                          .find((m) => m.role === 'user');
+                        if (lastUserMsg) {
+                          handleSendMessage(lastUserMsg.content);
+                        }
+                      }}
+                      className="h-7 px-2.5 text-xs font-semibold border-destructive/40 hover:bg-destructive/20 text-destructive shrink-0 cursor-pointer"
+                    >
+                      Retry Response
+                    </Button>
+                  </div>
+                )}
+                <div className="relative flex items-center">
+                  <Textarea
+                    ref={textareaRef}
+                    rows={1}
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder={t.chat.inputPlaceholder}
+                    className="min-h-[48px] max-h-44 resize-none pr-12 py-3 sm:py-3.5 text-sm leading-relaxed [scrollbar-width:none] [&::-webkit-scrollbar]:hidden overflow-y-auto bg-background border-border/80 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30 shadow-xs transition-all"
+                    disabled={isAiThinking}
+                    autoFocus
+                  />
                   <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      const lastUserMsg = [...session.messages]
-                        .reverse()
-                        .find((m) => m.role === 'user');
-                      if (lastUserMsg) {
-                        handleSendMessage(lastUserMsg.content);
-                      }
-                    }}
-                    className="h-7 px-2.5 text-xs font-semibold border-destructive/40 hover:bg-destructive/20 text-destructive shrink-0 cursor-pointer"
+                    onClick={() => handleSendMessage()}
+                    disabled={!inputText.trim() || isAiThinking}
+                    size="icon"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 h-8 w-8 rounded-lg shadow-xs transition-all duration-150 hover:opacity-90 hover:scale-105 active:scale-95 cursor-pointer disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:opacity-40 disabled:opacity-40 select-none"
                   >
-                    Retry Response
+                    {isAiThinking ? (
+                      <ThinkingOrb state="working" size={20} />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
                   </Button>
                 </div>
-              )}
-              <div className="relative flex items-center">
-                <Textarea
-                  ref={textareaRef}
-                  rows={1}
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={t.chat.inputPlaceholder}
-                  className="min-h-[48px] max-h-44 resize-none pr-12 py-3 sm:py-3.5 text-sm leading-relaxed [scrollbar-width:none] [&::-webkit-scrollbar]:hidden overflow-y-auto bg-background border-border/80 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30 shadow-xs transition-all"
-                  disabled={isAiThinking}
-                  autoFocus
-                />
-                <Button
-                  onClick={() => handleSendMessage()}
-                  disabled={!inputText.trim() || isAiThinking}
-                  size="icon"
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 h-8 w-8 rounded-lg shadow-xs transition-all duration-150 hover:opacity-90 hover:scale-105 active:scale-95 cursor-pointer disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:opacity-40 disabled:opacity-40 select-none"
-                >
-                  {isAiThinking ? (
-                    <ThinkingOrb state="working" size={20} />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                </Button>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

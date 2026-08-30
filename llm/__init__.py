@@ -15,6 +15,7 @@ from .prompts import (
     build_chunk_evaluation_prompt,
     build_final_evaluation_aggregation_prompt,
     build_evaluation_report_prompt,
+    is_wrapup_or_evaluation_message,
 )
 from .constants import (
     DEFAULT_CHAT_TEMPERATURE,
@@ -53,6 +54,7 @@ __all__ = [
     "build_chunk_evaluation_prompt",
     "build_final_evaluation_aggregation_prompt",
     "build_evaluation_report_prompt",
+    "is_wrapup_or_evaluation_message",
     "DEFAULT_CHAT_TEMPERATURE",
     "DEFAULT_EVALUATION_TEMPERATURE",
     "HTTP_CONNECT_TIMEOUT_SECONDS",

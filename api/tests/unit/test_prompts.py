@@ -13,6 +13,7 @@ from llm.prompts import (
     build_chunk_evaluation_prompt,
     build_final_evaluation_aggregation_prompt,
     build_evaluation_report_prompt,
+    parse_transcript_into_qa_rounds,
 )
 
 
@@ -131,7 +132,7 @@ class TestPromptEngineering:
         )
         assert "Monitoring & Prometheus Alerting" in prompt
         assert "Pot folosi Helm?" in prompt
-        assert "persoana a II-a singular" in prompt
+        assert "persoana a ii-a singular" in prompt.lower()
 
     def test_build_refusal_response_prompt(self):
         prompt = build_refusal_response_prompt(
@@ -144,7 +145,7 @@ class TestPromptEngineering:
         )
         assert "Kafka & Event Sourcing" in prompt
         assert "PostgreSQL Performance" in prompt
-        assert "persoana a II-a singular" in prompt
+        assert "persoana a ii-a singular" in prompt.lower()
 
     def test_build_next_question_prompt_turn_progression(self):
         prompt = build_next_question_prompt(
@@ -174,7 +175,8 @@ class TestPromptEngineering:
             is_final_wrap_up=True,
         )
         assert "[INTERVIEW_COMPLETE]" in prompt
-        assert "încheiat cu succes" in prompt
+        assert "încheiat complet" in prompt
+        assert "ESTE STRICT INTERZIS" in prompt
 
     def test_build_extract_topics_prompt(self):
         prompt = build_extract_topics_prompt(
@@ -230,3 +232,17 @@ class TestPromptEngineering:
         assert "Depends()" in prompt
         assert "Alex" in prompt
         assert "recommendation" in prompt
+
+    def test_parse_transcript_into_qa_rounds_with_clarifications(self):
+        messages = [
+            {"role": "assistant", "content": "Cum ai gestiona consistența datelor într-un sistem distribuit?"},
+            {"role": "user", "content": "Poți clarifica puțin întrebarea? La ce aspect te referi?"},
+            {"role": "assistant", "content": "Mă refer la gestionarea evenimentelor. Cum ai aborda tu problema?"},
+            {"role": "user", "content": "Aș folosi evenimentele ca sursă de adevăr și aș face procesarea idempotentă."},
+            {"role": "assistant", "content": "Îți mulțumesc pentru răspunsuri! [INTERVIEW_COMPLETE]"},
+        ]
+        rounds = parse_transcript_into_qa_rounds(messages)
+        assert len(rounds) == 1
+        assert rounds[0]["question"] == "Cum ai gestiona consistența datelor într-un sistem distribuit?"
+        assert "procesarea idempotentă" in rounds[0]["answer"]
+        assert "Clarification Context: Candidate proactively clarified" in rounds[0]["answer"]

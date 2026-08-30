@@ -10,7 +10,8 @@
   - **Output Sanitization & Anti-Roleplay**: `_clean_llm_response` automatically removes any `<think>` blocks, persona prefixes (e.g. `**You (...):**`, `Interviewer:`), and outer quotes from LLM outputs.
   - **Smart Name Extraction Fallback**: If a candidate's name is the default fallback `"Candidate"` (e.g. from `CV.pdf`), extracts the candidate's real full name from the document header while strictly preserving any custom or pre-set candidate names.
   - Conversational message streaming via SSE (`/stream`).
-  - Comprehensive candidate evaluation generation upon completion.
+  - Comprehensive candidate evaluation generation upon completion with strict idempotency (updates existing wrap-up message or returns existing report, preventing duplicate closing messages across multiple finishes or page refreshes).
+  - **Deterministic Hardcoded Closing**: The final thank-you message at interview conclusion is generated deterministically without calling the LLM, preventing candidate persona hallucination. The evaluator transcript strictly strips all wrapup messages to avoid penalizing candidates with fictitious unanswered final questions.
 
 ## 2. `cv_service.py` & `cv_parser.py`
 - **Class**: `CVService` & `CVParser`

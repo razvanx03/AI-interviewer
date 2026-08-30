@@ -361,9 +361,11 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
 
   const handleCopyLink = async () => {
     if (isCopying || isStarting || isLoading) return;
-    setIsCopying(true);
     setFormError(null);
     try {
+      if (!createdSession) {
+        setIsCopying(true);
+      }
       const session = await getOrCreateSession();
       const inviteUrl = `${window.location.origin}/interview/${session.id}`;
       await navigator.clipboard.writeText(inviteUrl);
@@ -489,21 +491,21 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
   }, [activePdfUrl]);
 
   return (
-    <div className="w-full flex-1 flex flex-col gap-3 sm:gap-4 min-h-0">
+    <div className="w-full flex-1 flex flex-col gap-2 sm:gap-2.5 min-h-0">
       {/* 3-Step Wizard Progress Stepper */}
-      <div className="w-full grid grid-cols-3 gap-1.5 sm:gap-2 rounded-xl border border-border/80 bg-card/90 p-1.5 sm:p-2 backdrop-blur shadow-xs shrink-0">
+      <div className="w-full grid grid-cols-3 gap-1 sm:gap-1.5 rounded-xl border border-border/80 bg-card/90 p-1 sm:p-1.5 backdrop-blur shadow-xs shrink-0">
         {/* Step 1 Button */}
         <button
           type="button"
           onClick={() => goToStep(1)}
-          className={`flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2 rounded-lg px-2 sm:px-3 py-2 text-xs sm:text-sm font-medium transition-all cursor-pointer select-none ${
+          className={`flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2 rounded-lg px-2 sm:px-2.5 py-1.5 sm:py-1.5 text-xs sm:text-sm font-medium transition-all cursor-pointer select-none ${
             currentStep === 1
               ? 'bg-primary text-primary-foreground shadow-sm font-semibold'
               : 'text-foreground hover:bg-accent/60 hover:text-foreground'
           }`}
         >
           <div
-            className={`flex h-5 w-5 sm:h-6 sm:w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold select-none ${
+            className={`flex h-5 w-5 sm:h-5.5 sm:w-5.5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold select-none ${
               currentStep === 1
                 ? 'bg-primary-foreground text-primary'
                 : jobTitle.trim() && jobDescription.trim()
@@ -531,14 +533,14 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
               setFormError(t.form.validationError);
             }
           }}
-          className={`flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2 rounded-lg px-2 sm:px-3 py-2 text-xs sm:text-sm font-medium transition-all cursor-pointer select-none ${
+          className={`flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2 rounded-lg px-2 sm:px-2.5 py-1.5 sm:py-1.5 text-xs sm:text-sm font-medium transition-all cursor-pointer select-none ${
             currentStep === 2
               ? 'bg-primary text-primary-foreground shadow-sm font-semibold'
               : 'text-foreground hover:bg-accent/60 hover:text-foreground'
           }`}
         >
           <div
-            className={`flex h-5 w-5 sm:h-6 sm:w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold select-none ${
+            className={`flex h-5 w-5 sm:h-5.5 sm:w-5.5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold select-none ${
               currentStep === 2
                 ? 'bg-primary-foreground text-primary'
                 : currentStep > 2 && candidates.length > 0
@@ -563,7 +565,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
           onClick={() => {
             if (activeTopCandidate || createdSession) goToStep(3);
           }}
-          className={`flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2 rounded-lg px-2 sm:px-3 py-2 text-xs sm:text-sm font-medium transition-all select-none ${
+          className={`flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2 rounded-lg px-2 sm:px-2.5 py-1.5 sm:py-1.5 text-xs sm:text-sm font-medium transition-all select-none ${
             !activeTopCandidate && !createdSession
               ? 'opacity-40 cursor-not-allowed text-muted-foreground'
               : currentStep === 3
@@ -572,7 +574,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
           }`}
         >
           <div
-            className={`flex h-5 w-5 sm:h-6 sm:w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+            className={`flex h-5 w-5 sm:h-5.5 sm:w-5.5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
               currentStep === 3
                 ? 'bg-amber-400 text-amber-950 shadow-2xs'
                 : activeTopCandidate || createdSession
@@ -600,17 +602,17 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
       {/* STEP 1: JOB SPECIFICATION */}
       {currentStep === 1 && (
         <Card className="w-full flex-1 flex flex-col border-border bg-card shadow-xs min-h-0">
-          <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-3 shrink-0">
+          <CardHeader className="p-3 sm:p-4 pb-2 sm:pb-2.5 shrink-0">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl bg-blue-500/15 text-blue-500 dark:text-blue-400 border border-blue-500/30 shadow-2xs">
-                  <Briefcase className="h-4 w-4 sm:h-4.5 sm:w-4.5" />
+                <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-xl bg-blue-500/15 text-blue-500 dark:text-blue-400 border border-blue-500/30 shadow-2xs">
+                  <Briefcase className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </div>
                 <div className="min-w-0">
-                  <CardTitle className="text-base sm:text-lg font-bold truncate">
+                  <CardTitle className="text-sm sm:text-base font-bold truncate">
                     {t.form.step1Title}
                   </CardTitle>
-                  <CardDescription className="text-xs text-muted-foreground mt-0.5">
+                  <CardDescription className="text-[11px] text-muted-foreground mt-0.5">
                     {t.form.step1Subtitle}
                   </CardDescription>
                 </div>
@@ -621,15 +623,15 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                 variant="outline"
                 size="sm"
                 onClick={fillSampleJob}
-                className="h-8 text-xs font-medium text-foreground hover:bg-accent hover:border-border shrink-0 px-2.5 sm:px-3 shadow-2xs cursor-pointer"
+                className="h-7.5 text-xs font-medium text-foreground hover:bg-accent hover:border-border shrink-0 px-2 sm:px-2.5 shadow-2xs cursor-pointer"
               >
-                <Sparkles className="mr-1.5 h-3.5 w-3.5 text-amber-500" />
+                <Sparkles className="h-3.5 w-3.5 mr-1 text-blue-500 dark:text-blue-400" />
                 <span>{t.form.fillJobSample}</span>
               </Button>
             </div>
           </CardHeader>
 
-          <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0 flex-1 flex flex-col min-h-0">
+          <CardContent className="p-3 sm:p-4 pt-0 flex-1 flex flex-col min-h-0">
             <form
               onSubmit={handleNextStep1}
               className="flex-1 flex flex-col justify-between gap-4 min-h-0"
@@ -741,17 +743,17 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
       {/* STEP 2: CANDIDATE POOL & CVs */}
       {currentStep === 2 && (
         <Card className="w-full flex-1 flex flex-col border-border bg-card shadow-xs min-h-0">
-          <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-3 shrink-0">
+          <CardHeader className="p-3 sm:p-4 pb-2 sm:pb-2.5 shrink-0">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-500 dark:text-indigo-400 border border-indigo-500/30 shadow-2xs">
-                  <Users className="h-4 w-4 sm:h-4.5 sm:w-4.5" />
+                <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-500 dark:text-indigo-400 border border-indigo-500/30 shadow-2xs">
+                  <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </div>
                 <div className="min-w-0">
-                  <CardTitle className="text-base sm:text-lg font-bold truncate">
+                  <CardTitle className="text-sm sm:text-base font-bold truncate">
                     {t.form.step2Title}
                   </CardTitle>
-                  <CardDescription className="text-xs text-muted-foreground mt-0.5">
+                  <CardDescription className="text-[11px] text-muted-foreground mt-0.5">
                     {t.form.step2Subtitle}
                   </CardDescription>
                 </div>
@@ -762,15 +764,15 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                 variant="outline"
                 size="sm"
                 onClick={fillSampleCandidates}
-                className="h-8 text-xs font-medium text-foreground hover:bg-accent hover:border-border shrink-0 px-2.5 sm:px-3 shadow-2xs cursor-pointer"
+                className="h-7.5 text-xs font-medium text-foreground hover:bg-accent hover:border-border shrink-0 px-2 sm:px-2.5 shadow-2xs cursor-pointer"
               >
-                <Sparkles className="mr-1.5 h-3.5 w-3.5 text-amber-500" />
+                <Sparkles className="mr-1 h-3.5 w-3.5 text-amber-500" />
                 <span>{t.form.loadSample}</span>
               </Button>
             </div>
           </CardHeader>
 
-          <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0 flex-1 flex flex-col min-h-0">
+          <CardContent className="p-3 sm:p-4 pt-0 flex-1 flex flex-col min-h-0">
             <form
               onSubmit={handleStep2Screen}
               className="flex-1 flex flex-col justify-between gap-4 min-h-0"
@@ -856,7 +858,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
         >
           {/* Left Column: Selection Card with Bottom Navigation */}
           <div
-            className="w-full lg:flex-none flex flex-col gap-4 min-h-0 lg:pr-3"
+            className="w-full lg:flex-none flex flex-col gap-3 min-h-0 lg:pr-3"
             style={{ width: undefined }}
             // Apply dynamic width on desktop
             ref={(el) => {
@@ -868,7 +870,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
             }}
           >
             <Card className="border-border bg-card shadow-xs flex-1 flex flex-col min-h-0">
-              <CardContent className="p-4 sm:p-6 flex-1 flex flex-col justify-between space-y-4 min-h-0 overflow-y-auto">
+              <CardContent className="p-3 sm:p-4 lg:p-5 flex-1 flex flex-col justify-between space-y-3 min-h-0 overflow-y-auto">
                 <div className="space-y-4">
                   {formError && (
                     <div className="flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs font-medium text-destructive shrink-0">
@@ -1141,14 +1143,9 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                         size="sm"
                         onClick={handleCopyLink}
                         disabled={!createdSession || isCopying || isStarting || isLoading}
-                        className="h-8.5 px-3 gap-1.5 text-xs shrink-0 cursor-pointer shadow-2xs min-w-[70px] select-none"
+                        className="h-8.5 px-3 gap-1.5 text-xs shrink-0 cursor-pointer shadow-2xs w-[78px] select-none justify-center transition-colors"
                       >
-                        {isCopying ? (
-                          <div className="flex items-center gap-1.5">
-                            <ThinkingOrb state="connecting" size={20} />
-                            <span>Generating...</span>
-                          </div>
-                        ) : isCopied ? (
+                        {isCopied ? (
                           <>
                             <Check className="h-3.5 w-3.5 text-emerald-500" />
                             <span className="text-emerald-500 font-medium">Copied!</span>

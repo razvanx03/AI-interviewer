@@ -1,6 +1,6 @@
 export type ExperienceLevel = 'entry' | 'mid' | 'senior' | 'lead' | 'executive';
 
-export type InterviewStatus = 'draft' | 'active' | 'completed';
+export type InterviewStatus = 'draft' | 'active' | 'finishing' | 'completed';
 
 export interface ChatMessage {
   id: string;

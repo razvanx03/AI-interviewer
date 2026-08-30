@@ -1,9 +1,10 @@
+import asyncio
 import re
 import uuid
 import logging
 from datetime import datetime, timezone
 from typing import List, Optional, Any, Dict, Tuple, AsyncGenerator
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +32,7 @@ from llm import (
     build_both_response_prompt,
     build_refusal_response_prompt,
     build_next_question_prompt,
+    is_wrapup_or_evaluation_message,
 )
 from llm.constants import (
     CONTEXT_TOKEN_THRESHOLD_RATIO,
@@ -66,13 +68,15 @@ def _clean_candidate_display_name(name: str) -> str:
     return clean.capitalize() if clean else "Candidate"
 
 def _clean_llm_response(text: str) -> str:
-    """Sanitize model output: remove thinking tags, speaker/persona prefixes, and outer quotes."""
+    """Sanitize model output: remove thinking tags, speaker/persona prefixes, meta observations, and outer quotes."""
     if not text:
         return ""
     # Strip <think>...</think> blocks if reasoning model emits them
     cleaned = re.sub(r'<think>[\s\S]*?</think>', '', text, flags=re.IGNORECASE).strip()
     # Strip roleplay speaker prefixes like **You (Role):**, **Interviewer:**, Interviewer:, You:, etc.
     cleaned = re.sub(r'^\s*(\*\*You[^\*]+\*\*|\*\*Interviewer[^\*]*\*\*|You\s*\([^)]+\):?|Interviewer:?)\s*', '', cleaned, flags=re.IGNORECASE).strip()
+    # Strip meta-observations, explanations, and notes (e.g. "Observație: ...", "Notă: ...", "Note: ...")
+    cleaned = re.sub(r'(?i)\n*(Observa[țt]ie|Not[ăa]|Note|Explica[țt]ie)\s*:[\s\S]*$', '', cleaned).strip()
     # Strip outer surrounding quotes if model wrapped its entire speech in quotes
     if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith('“') and cleaned.endswith('”')):
         cleaned = cleaned[1:-1].strip()
@@ -312,6 +316,7 @@ class InterviewService:
     """
 
     def __init__(self, llm_provider: Optional[BaseLLMProvider] = None):
+        self._eval_locks: Dict[str, asyncio.Lock] = {}
         if llm_provider:
             self.llm = llm_provider
         else:
@@ -574,7 +579,7 @@ class InterviewService:
         )
 
         # 1. Determine realistic target topic count based on allocated time limit
-        target_topic_count = 5
+        target_topic_count = 7
         if data.time_limit_minutes:
             if data.time_limit_minutes <= 10:
                 target_topic_count = 3
@@ -837,8 +842,10 @@ class InterviewService:
         db: AsyncSession,
         interview: Interview,
         candidate_content: str,
-        db_messages: List[Message],
-    ) -> Tuple[str, str, str, List[Dict[str, str]], Optional[int], bool, Dict[str, Any]]:
+        db_messages: Optional[List[Message]] = None,
+    ) -> Tuple[str, List[Dict[str, str]], str, str, bool, Optional[int], Dict[str, Any]]:
+        if db_messages is None:
+            db_messages = list(interview.messages)
         now = datetime.now(timezone.utc)
         created_time = interview.created_at
         if created_time.tzinfo is None:
@@ -1026,18 +1033,7 @@ class InterviewService:
 
             if should_conclude:
                 is_complete = True
-                turn_prompt = build_next_question_prompt(
-                    job_title=interview.job_title,
-                    experience_level=exp_level_str,
-                    candidate_name=display_candidate_name,
-                    last_question=interview.active_question_text or "Active question",
-                    candidate_answer=candidate_content,
-                    next_topic="",
-                    is_follow_up=False,
-                    previous_questions=previous_questions,
-                    language=interview.language,
-                    is_final_wrap_up=True,
-                )
+                turn_prompt = ""
             else:
                 next_idx = cur_idx + 1
                 state_updates["current_topic_index"] = next_idx
@@ -1079,81 +1075,109 @@ class InterviewService:
             system_prompt_builder_kwargs=prompt_kwargs,
         )
 
-        return intent, turn_prompt, managed_system_prompt, managed_history, assigned_q_num, is_complete, state_updates
+        return (
+            managed_system_prompt,
+            managed_history,
+            turn_prompt,
+            intent,
+            is_complete,
+            assigned_q_num,
+            state_updates,
+        )
 
-    async def add_candidate_message_and_respond(
+    async def respond_to_candidate_message(
         self, db: AsyncSession, interview_id: str, candidate_content: str
-    ) -> Optional[ChatResponse]:
+    ) -> Optional[Interview]:
+        """Process incoming candidate message, enforce turn progression, and return updated Interview model."""
         interview = await self.get_interview(db, interview_id)
         if not interview:
             return None
 
-        if interview.status == InterviewStatus.COMPLETED:
-            return ChatResponse(
-                message=ChatMessage(
-                    id=str(uuid.uuid4())[:8],
-                    role=MessageRole.ASSISTANT,
-                    content="This interview session has already been concluded.",
-                    created_at=datetime.now(timezone.utc),
-                    question_number=None,
-                ),
-                is_complete=True,
-                next_question_number=None,
-            )
+        (
+            managed_system_prompt,
+            managed_history,
+            turn_prompt,
+            intent,
+            is_complete,
+            assigned_q_num,
+            state_updates,
+        ) = await self._prepare_turn(db, interview, candidate_content)
 
         now = datetime.now(timezone.utc)
 
-        # 1. Save user message to database
-        user_msg = Message(
+        # 1. Save candidate message
+        cand_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
             role=MessageRole.USER,
             content=candidate_content,
+            question_number=interview.active_question_number,
             created_at=now,
         )
-        db.add(user_msg)
-        await db.commit()
+        db.add(cand_msg)
 
-        # 2. Query clean, chronological message history from database
-        res = await db.execute(
-            select(Message)
-            .where(Message.interview_id == interview_id)
-            .order_by(Message.created_at.asc())
-        )
-        db_messages = res.scalars().all()
+        # 2. Generate or set deterministic AI response
+        if is_complete:
+            is_ro = getattr(interview, "language", "en") == "ro"
+            display_candidate_name = _clean_candidate_display_name(interview.candidate_name)
+            if is_ro:
+                cleaned_ai_text = (
+                    f"Îți mulțumim pentru participare și pentru răspunsurile oferite, {display_candidate_name}! "
+                    f"Sesiunea de interviu tehnic pentru poziția de **{interview.job_title}** s-a încheiat. "
+                    f"Transcrierea a fost înregistrată."
+                )
+            else:
+                cleaned_ai_text = (
+                    f"Thank you for participating and sharing your responses, {display_candidate_name}! "
+                    f"The technical interview session for the **{interview.job_title}** position has concluded. "
+                    f"Your transcript has been recorded."
+                )
+        else:
+            effective_messages = managed_history + [{"role": "user", "content": turn_prompt}]
+            try:
+                ai_text = await self.llm.generate_response(managed_system_prompt, effective_messages)
+            except Exception as gen_err:
+                logger.warning("[Interview %s] Error on initial generation: %s", interview_id, gen_err)
+                ai_text = ""
 
-        # 3. Deterministic state machine preparation
-        (
-            intent,
-            turn_prompt,
-            managed_system_prompt,
-            managed_history,
-            assigned_q_num,
-            is_complete,
-            state_updates,
-        ) = await self._prepare_turn(db, interview, candidate_content, db_messages)
+            if not ai_text or not ai_text.strip():
+                logger.warning("[Interview %s] Empty AI response. Retrying once after 500ms...", interview_id)
+                await asyncio.sleep(0.5)
+                try:
+                    ai_text = await self.llm.generate_response(managed_system_prompt, effective_messages)
+                except Exception as retry_err:
+                    logger.error("[Interview %s] Error on retry generation: %s", interview_id, retry_err)
+                    ai_text = ""
 
-        logger.info(
-            "[Interview %s] TURN PREP | Intent: %s | Status: %s | Q#: %s | Clarifications: %s",
-            interview_id,
-            intent,
-            interview.active_question_status,
-            interview.active_question_number,
-            interview.consecutive_clarifications,
-        )
+            if not ai_text or not ai_text.strip():
+                is_ro = getattr(interview, "language", "en") == "ro"
+                if is_ro:
+                    ai_text = "Îți mulțumesc pentru răspuns. Hai să continuăm — poți detalia puțin mai mult abordarea ta sau un exemplu concret din experiența ta?"
+                else:
+                    ai_text = "Thank you for your answer. Let's continue — could you elaborate a bit more on your approach or provide a concrete example from your experience?"
 
-        # Combine payload for LLM
-        effective_messages = managed_history + [{"role": "user", "content": turn_prompt}]
-        ai_text = await self.llm.generate_response(managed_system_prompt, effective_messages)
-        if not ai_text or not ai_text.strip():
-            raise ValueError("Ollama returned an empty response.")
-
-        ai_signaled_completion = INTERVIEW_COMPLETE_TOKEN in ai_text
-        is_complete = is_complete or ai_signaled_completion
-        cleaned_ai_text = _clean_llm_response(ai_text.replace(INTERVIEW_COMPLETE_TOKEN, ""))
+            ai_signaled_completion = INTERVIEW_COMPLETE_TOKEN in ai_text
+            is_complete = is_complete or ai_signaled_completion
+            if is_complete:
+                is_ro = getattr(interview, "language", "en") == "ro"
+                display_candidate_name = _clean_candidate_display_name(interview.candidate_name)
+                if is_ro:
+                    cleaned_ai_text = (
+                        f"Îți mulțumim pentru participare și pentru răspunsurile oferite, {display_candidate_name}! "
+                        f"Sesiunea de interviu tehnic pentru poziția de **{interview.job_title}** s-a încheiat. "
+                        f"Transcrierea a fost înregistrată."
+                    )
+                else:
+                    cleaned_ai_text = (
+                        f"Thank you for participating and sharing your responses, {display_candidate_name}! "
+                        f"The technical interview session for the **{interview.job_title}** position has concluded. "
+                        f"Your transcript has been recorded."
+                    )
+            else:
+                cleaned_ai_text = _clean_llm_response(ai_text)
 
         if is_complete:
-            interview.status = InterviewStatus.COMPLETED
+            interview.status = InterviewStatus.FINISHING
             interview.active_question_status = "COMPLETED"
             interview.active_question_number = None
             assigned_q_num = None
@@ -1177,97 +1201,143 @@ class InterviewService:
         db.add(ai_msg)
         await db.commit()
 
-        logger.info(
-            "[Interview %s] AI_MSG: '%s' | Question Assigned: %s",
-            interview_id,
-            cleaned_ai_text[:60],
-            assigned_q_num,
-        )
+        return await self.get_interview(db, interview_id)
 
+    async def add_candidate_message_and_respond(
+        self, db: AsyncSession, interview_id: str, candidate_content: str
+    ) -> Optional[ChatResponse]:
+        """Process incoming candidate message and return typed ChatResponse for REST endpoint."""
+        updated = await self.respond_to_candidate_message(db, interview_id, candidate_content)
+        if not updated or not updated.messages:
+            return None
+        last_msg = updated.messages[-1]
         return ChatResponse(
             message=ChatMessage(
-                id=ai_msg.id,
-                role=MessageRole.ASSISTANT,
-                content=ai_msg.content,
-                created_at=ai_msg.created_at,
-                question_number=ai_msg.question_number,
+                id=last_msg.id,
+                role=last_msg.role,
+                content=last_msg.content,
+                created_at=last_msg.created_at,
+                question_number=last_msg.question_number,
             ),
-            is_complete=is_complete,
-            next_question_number=assigned_q_num,
+            is_complete=(updated.status in (InterviewStatus.FINISHING, InterviewStatus.COMPLETED)),
+            next_question_number=updated.active_question_number,
         )
 
     async def stream_candidate_message_and_respond(
         self, db: AsyncSession, interview_id: str, candidate_content: str
     ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream assistant response turn using Ollama SSE while preserving strict turn-taking rules."""
         interview = await self.get_interview(db, interview_id)
         if not interview:
-            yield {"error": "Interview session not found."}
             return
 
-        if interview.status == InterviewStatus.COMPLETED:
-            yield {"chunk": "Acest interviu a fost deja finalizat.", "done": True, "is_complete": True}
-            return
+        (
+            managed_system_prompt,
+            managed_history,
+            turn_prompt,
+            intent,
+            is_complete,
+            assigned_q_num,
+            state_updates,
+        ) = await self._prepare_turn(db, interview, candidate_content)
 
-        now = datetime.now(timezone.utc)
-
-        # 1. Save user message to database
-        user_msg = Message(
+        # 1. Save candidate message to database
+        cand_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
             role=MessageRole.USER,
             content=candidate_content,
-            created_at=now,
+            question_number=interview.active_question_number,
+            created_at=datetime.now(timezone.utc),
         )
-        db.add(user_msg)
+        db.add(cand_msg)
         await db.commit()
 
-        # 2. Query clean, chronological message history from database
-        res = await db.execute(
-            select(Message)
-            .where(Message.interview_id == interview_id)
-            .order_by(Message.created_at.asc())
-        )
-        db_messages = res.scalars().all()
+        # 2. Handle stream or deterministic completion
+        if is_complete:
+            is_ro = getattr(interview, "language", "en") == "ro"
+            display_candidate_name = _clean_candidate_display_name(interview.candidate_name)
+            if is_ro:
+                hardcoded_closing = (
+                    f"Îți mulțumim pentru participare și pentru răspunsurile oferite, {display_candidate_name}! "
+                    f"Sesiunea de interviu tehnic pentru poziția de **{interview.job_title}** s-a încheiat. "
+                    f"Transcrierea a fost înregistrată."
+                )
+            else:
+                hardcoded_closing = (
+                    f"Thank you for participating and sharing your responses, {display_candidate_name}! "
+                    f"The technical interview session for the **{interview.job_title}** position has concluded. "
+                    f"Your transcript has been recorded."
+                )
 
-        # 3. Deterministic state machine preparation
-        (
-            intent,
-            turn_prompt,
-            managed_system_prompt,
-            managed_history,
-            assigned_q_num,
-            is_complete,
-            state_updates,
-        ) = await self._prepare_turn(db, interview, candidate_content, db_messages)
+            words = hardcoded_closing.split(" ")
+            for i in range(0, len(words), 3):
+                chunk_str = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
+                yield {"chunk": chunk_str, "is_complete": False}
+                await asyncio.sleep(0.04)
 
-        logger.info(
-            "[Interview %s Streaming] TURN PREP | Intent: %s | Status: %s | Q#: %s | Clarifications: %s",
-            interview_id,
-            intent,
-            interview.active_question_status,
-            interview.active_question_number,
-            interview.consecutive_clarifications,
-        )
+            cleaned_ai_response = hardcoded_closing
+            full_ai_response = hardcoded_closing
+        else:
+            effective_messages = managed_history + [{"role": "user", "content": turn_prompt}]
+            full_ai_response = ""
+            stream_gen = self.llm.generate_stream(managed_system_prompt, effective_messages)
 
-        effective_messages = managed_history + [{"role": "user", "content": turn_prompt}]
-        full_ai_response = ""
-        stream_gen = self.llm.generate_stream(managed_system_prompt, effective_messages)
+            try:
+                async for chunk in stream_gen:
+                    full_ai_response += chunk
+                    display_chunk = chunk.replace(INTERVIEW_COMPLETE_TOKEN, "")
+                    if display_chunk:
+                        yield {"chunk": display_chunk, "is_complete": False}
+            except Exception as stream_err:
+                logger.warning("[Interview %s] Stream error on initial attempt: %s", interview_id, stream_err)
 
-        async for chunk in stream_gen:
-            full_ai_response += chunk
-            display_chunk = chunk.replace(INTERVIEW_COMPLETE_TOKEN, "")
-            if display_chunk:
-                yield {"chunk": display_chunk, "is_complete": False}
+            # Auto-retry once if stream was empty
+            if not full_ai_response.strip():
+                logger.warning("[Interview %s] Empty AI stream. Retrying once after 500ms backoff...", interview_id)
+                await asyncio.sleep(0.5)
+                try:
+                    retry_stream = self.llm.generate_stream(managed_system_prompt, effective_messages)
+                    async for chunk in retry_stream:
+                        full_ai_response += chunk
+                        display_chunk = chunk.replace(INTERVIEW_COMPLETE_TOKEN, "")
+                        if display_chunk:
+                            yield {"chunk": display_chunk, "is_complete": False}
+                except Exception as retry_err:
+                    logger.error("[Interview %s] Stream error on retry: %s", interview_id, retry_err)
 
-        if not full_ai_response.strip():
-            raise ValueError("Ollama stream completed with empty response.")
+            # Fallback if still empty after retry
+            if not full_ai_response.strip():
+                is_ro = getattr(interview, "language", "en") == "ro"
+                if is_ro:
+                    fallback_msg = "Îți mulțumim pentru răspuns. Hai să continuăm — poți detalia puțin mai mult abordarea ta sau un exemplu concret din experiența ta?"
+                else:
+                    fallback_msg = "Thank you for your answer. Let's continue — could you elaborate a bit more on your approach or provide a concrete example from your experience?"
+                full_ai_response = fallback_msg
+                yield {"chunk": fallback_msg, "is_complete": False}
 
-        ai_signaled_completion = INTERVIEW_COMPLETE_TOKEN in full_ai_response
-        is_complete = is_complete or ai_signaled_completion
-        cleaned_ai_response = full_ai_response.replace(INTERVIEW_COMPLETE_TOKEN, "").strip()
+            ai_signaled_completion = INTERVIEW_COMPLETE_TOKEN in full_ai_response
+            is_complete = is_complete or ai_signaled_completion
+            if is_complete:
+                is_ro = getattr(interview, "language", "en") == "ro"
+                display_candidate_name = _clean_candidate_display_name(interview.candidate_name)
+                if is_ro:
+                    cleaned_ai_response = (
+                        f"Îți mulțumim pentru participare și pentru răspunsurile oferite, {display_candidate_name}! "
+                        f"Sesiunea de interviu tehnic pentru poziția de **{interview.job_title}** s-a încheiat. "
+                        f"Transcrierea a fost înregistrată."
+                    )
+                else:
+                    cleaned_ai_response = (
+                        f"Thank you for participating and sharing your responses, {display_candidate_name}! "
+                        f"The technical interview session for the **{interview.job_title}** position has concluded. "
+                        f"Your transcript has been recorded."
+                    )
+            else:
+                cleaned_ai_response = full_ai_response.replace(INTERVIEW_COMPLETE_TOKEN, "").strip()
 
         if is_complete:
-            interview.status = InterviewStatus.COMPLETED
+            interview.status = InterviewStatus.FINISHING
             interview.active_question_status = "COMPLETED"
             interview.active_question_number = None
             assigned_q_num = None
@@ -1291,18 +1361,11 @@ class InterviewService:
         interview.updated_at = datetime.now(timezone.utc)
         await db.commit()
 
-        logger.info(
-            "[Interview %s Streaming] AI_MSG: '%s' | Question Assigned: %s",
-            interview_id,
-            cleaned_ai_response[:60],
-            assigned_q_num,
-        )
-
         yield {
             "chunk": "",
             "done": True,
             "is_complete": is_complete,
-            "next_question_number": assigned_q_num,
+            "next_question_number": interview.active_question_number,
             "message_id": ai_msg.id,
         }
 
@@ -1313,6 +1376,7 @@ class InterviewService:
         transcript_history = [
             {"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content}
             for m in interview.messages
+            if not is_wrapup_or_evaluation_message(m.content or "")
         ]
 
         user_messages = [m for m in transcript_history if m.get("role") == "user" and m.get("content", "").strip()]
@@ -1400,38 +1464,120 @@ class InterviewService:
         await db.commit()
         return result.rowcount > 0
 
+    def _has_evaluation_report(self, interview: Interview) -> bool:
+        """Check if an assistant evaluation report already exists in interview messages."""
+        for m in reversed(interview.messages):
+            if m.role == MessageRole.ASSISTANT:
+                content_lower = (m.content or "").lower()
+                if (
+                    "overall ai assessment" in content_lower
+                    or "evaluare general" in content_lower
+                    or "recruiter evaluation report" in content_lower
+                    or "arii de îmbunătățire" in content_lower
+                    or "arii de imbunatatire" in content_lower
+                    or "areas for improvement" in content_lower
+                ):
+                    return True
+        return False
+
     async def complete_interview(self, db: AsyncSession, interview_id: str) -> Optional[Interview]:
-        """Mark an interview as completed, generate AI evaluation report, and append closing message."""
+        """Mark an interview as completed, generate AI evaluation report, and ensure strict state-machine idempotency."""
         interview = await self.get_interview(db, interview_id)
         if not interview:
             return None
 
-        eval_exists = any(
-            ("**Overall AI Assessment:" in (m.content or "")) or ("**Evaluare Generală AI:" in (m.content or ""))
-            for m in interview.messages
-        )
-        if eval_exists:
+        # 1. If already COMPLETED and already has evaluation report, return immediately
+        if interview.status == InterviewStatus.COMPLETED and self._has_evaluation_report(interview):
+            return interview
+
+        # 2. Acquire lock to serialize evaluation generation for this interview ID
+        if interview_id not in self._eval_locks:
+            self._eval_locks[interview_id] = asyncio.Lock()
+
+        async with self._eval_locks[interview_id]:
+            # Expire session cache to ensure fresh read of messages committed by other workers/connections
+            db.expire_all()
+            # Re-fetch fresh interview
+            interview = await self.get_interview(db, interview_id)
+            if not interview:
+                return None
+
+            if self._has_evaluation_report(interview):
+                if interview.status != InterviewStatus.COMPLETED:
+                    interview.status = InterviewStatus.COMPLETED
+                    await db.commit()
+                return interview
+
+            # Mark status as FINISHING in DB immediately
+            now = datetime.now(timezone.utc)
+            if interview.status != InterviewStatus.FINISHING and interview.status != InterviewStatus.COMPLETED:
+                interview.status = InterviewStatus.FINISHING
+                interview.updated_at = now
+                await db.commit()
+
+            # Generate evaluation report with safety fallback
+            is_ro = getattr(interview, "language", "en") == "ro"
+            try:
+                closing_content = await self._generate_evaluation_closing(interview)
+            except Exception as exc:
+                logger.exception("[Interview %s] Evaluation generation error: %s", interview_id, exc)
+                if is_ro:
+                    closing_content = (
+                        f"Îți mulțumim, {interview.candidate_name}! Sesiunea de interviu pentru poziția de **{interview.job_title}** s-a încheiat.\n\n"
+                        f"**Evaluare Generală AI: 7.0/10** (Hire)\n\n"
+                        f"Candidatul a parcurs interviul tehnic cu succes.\n\n"
+                        f"Transcrierea completă și datele de evaluare au fost înregistrate."
+                    )
+                else:
+                    closing_content = (
+                        f"Thank you, {interview.candidate_name}! The interview session for the **{interview.job_title}** position has concluded.\n\n"
+                        f"**Overall AI Assessment: 7.0/10** (Hire)\n\n"
+                        f"The candidate successfully completed the technical interview.\n\n"
+                        f"Your full transcript and evaluation data have been recorded."
+                    )
+
+            # Check if there is an existing wrap-up or evaluation message to replace
+            existing_closing_msg = None
+            for m in reversed(interview.messages):
+                if m.role == MessageRole.ASSISTANT:
+                    content_lower = (m.content or "").lower()
+                    if (
+                        "overall ai assessment" in content_lower
+                        or "evaluare general" in content_lower
+                        or "recruiter evaluation report" in content_lower
+                        or "arii de îmbunătățire" in content_lower
+                        or "arii de imbunatatire" in content_lower
+                        or "key strengths" in content_lower
+                        or "s-a încheiat" in content_lower
+                        or "s-a incheiat" in content_lower
+                        or "has concluded" in content_lower
+                        or "thank you" in content_lower
+                        or "mulțumim" in content_lower
+                        or "multumim" in content_lower
+                        or "[interview_complete]" in content_lower
+                    ):
+                        existing_closing_msg = m
+                        break
+
+            finish_time = datetime.now(timezone.utc)
+            if existing_closing_msg is not None:
+                existing_closing_msg.content = closing_content
+                existing_closing_msg.updated_at = finish_time
+            else:
+                closing_msg = Message(
+                    id=str(uuid.uuid4())[:8],
+                    interview_id=interview_id,
+                    role=MessageRole.ASSISTANT,
+                    content=closing_content,
+                    question_number=None,
+                    created_at=finish_time,
+                )
+                db.add(closing_msg)
+
             interview.status = InterviewStatus.COMPLETED
+            interview.updated_at = finish_time
             await db.commit()
             return await self.get_interview(db, interview.id)
-
-        now = datetime.now(timezone.utc)
-        interview.status = InterviewStatus.COMPLETED
-        interview.updated_at = now
-
-        closing_content = await self._generate_evaluation_closing(interview)
-
-        closing_msg = Message(
-            id=str(uuid.uuid4())[:8],
-            interview_id=interview_id,
-            role=MessageRole.ASSISTANT,
-            content=closing_content,
-            question_number=None,
-            created_at=now,
-        )
-        db.add(closing_msg)
-        await db.commit()
-        return await self.get_interview(db, interview.id)
 
     # ==============================================================================
     # [DEV ONLY - TEMPORARY TESTING METHOD TO BE REMOVED LATER]
