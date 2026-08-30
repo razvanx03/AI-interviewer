@@ -22,6 +22,9 @@
 **/venv
 **/.venv
 
-# Logs & temp
+# Logs, Storage & temp
+storage/
+uploads/
+**/.paddleocr
 **/*.log
 **/.DS_Store

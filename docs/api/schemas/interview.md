@@ -2,7 +2,7 @@
 
 ## 1. Pydantic Models
 - `ExperienceLevel`: Enum (`entry`, `mid`, `senior`, `lead`, `executive`)
-- `InterviewStatus`: Enum (`draft`, `active`, `completed`)
+- `InterviewStatus`: Enum (`draft`, `active`, `finishing`, `completed`)
 - `InterviewCreate`:
   - `job_title` (str, required)
   - `company_name` (Optional[str])

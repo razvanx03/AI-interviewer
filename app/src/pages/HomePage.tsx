@@ -41,28 +41,28 @@ export const HomePage: React.FC = () => {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Top Header */}
-      <header className="flex h-14 sm:h-16 shrink-0 items-center justify-between border-b border-border bg-card/60 px-3 sm:px-6 gap-2 backdrop-blur">
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+      <header className="flex h-11 sm:h-12 shrink-0 items-center justify-between border-b border-border bg-card/60 px-3 sm:px-5 gap-2 backdrop-blur">
+        <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
           {/* Mobile Menu / Sidebar Trigger */}
           <Button
             variant="ghost"
             size="icon"
             onClick={toggleSidebar}
-            className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground md:hidden"
+            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground md:hidden"
             title="Expand sidebar"
           >
-            <PanelLeftOpen className="h-4.5 w-4.5" />
+            <PanelLeftOpen className="h-4 w-4" />
           </Button>
 
           <div className="flex items-center gap-2 min-w-0">
-            <div className="hidden sm:flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <Sparkles className="h-4 w-4" />
+            <div className="hidden sm:flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-500/15 text-blue-500 dark:text-blue-400 border border-blue-500/30 shadow-2xs">
+              <Sparkles className="h-3.5 w-3.5" />
             </div>
             <div className="min-w-0">
-              <h1 className="truncate text-xs sm:text-base font-bold text-foreground">
+              <h1 className="truncate text-xs sm:text-sm font-bold text-foreground">
                 {t.header.createNew}
               </h1>
-              <p className="hidden text-xs text-muted-foreground sm:block">
+              <p className="hidden text-[11px] text-muted-foreground sm:block leading-tight">
                 {t.header.configureSubtitle}
               </p>
             </div>
@@ -70,9 +70,9 @@ export const HomePage: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Content Form - 3-Step Wizard */}
-      <main className="flex-1 overflow-y-auto p-3 sm:p-6 md:p-8 flex justify-center items-start">
-        <div className="w-full max-w-2xl py-2 sm:py-4 pb-12">
+      {/* Main Content Form - Fullscreen 3-Step Wizard */}
+      <main className="flex-1 flex flex-col min-h-0 overflow-y-auto pt-2 sm:pt-2.5 px-2.5 sm:px-4 pb-2.5 sm:pb-4 w-full">
+        <div className="w-full flex-1 flex flex-col min-h-0">
           <CreateInterviewForm
             onCreateSession={handleCreateSession}
             onStartInterview={handleStartInterview}

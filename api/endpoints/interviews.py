@@ -3,6 +3,8 @@ from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.session import get_db
+from models.user import User
+from core.deps import get_current_admin
 from schemas.interview import (
     InterviewCreate,
     InterviewResponse,
@@ -15,7 +17,10 @@ from services.interview_service import interview_service
 router = APIRouter()
 
 @router.post("/screen", response_model=CandidateScreeningResponse)
-async def screen_candidates_endpoint(data: CandidateScreeningRequest):
+async def screen_candidates_endpoint(
+    data: CandidateScreeningRequest,
+    admin: User = Depends(get_current_admin),
+):
     """Screen and rank candidate resumes without creating database session records yet."""
     top_cand, results = interview_service.screen_candidates(
         job_title=data.job_title,
@@ -26,7 +31,11 @@ async def screen_candidates_endpoint(data: CandidateScreeningRequest):
     return CandidateScreeningResponse(top_candidate=top_cand, screening_results=results)
 
 @router.post("", response_model=InterviewResponse, status_code=status.HTTP_201_CREATED)
-async def create_interview(data: InterviewCreate, db: AsyncSession = Depends(get_db)):
+async def create_interview(
+    data: InterviewCreate,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
     """Create a new interview session in PostgreSQL and generate the initial question."""
     interview = await interview_service.create_interview(db, data)
     return interview
@@ -35,6 +44,7 @@ async def create_interview(data: InterviewCreate, db: AsyncSession = Depends(get
 async def list_interviews(
     ids: Optional[str] = Query(None, description="Comma-separated list of interview IDs"),
     db: AsyncSession = Depends(get_db),
+    admin: User = Depends(get_current_admin),
 ):
     """List interviews, optionally filtered by comma-separated IDs stored in localStorage."""
     id_list = [i.strip() for i in ids.split(",")] if ids else None
@@ -76,7 +86,11 @@ async def complete_interview(interview_id: str, db: AsyncSession = Depends(get_d
     return interview
 
 @router.delete("/{interview_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_interview(interview_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_interview(
+    interview_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
     """Delete an interview and all associated messages from the database."""
     deleted = await interview_service.delete_interview(db, interview_id)
     if not deleted:
@@ -90,7 +104,10 @@ async def delete_interview(interview_id: str, db: AsyncSession = Depends(get_db)
 # [DEV ONLY - TEMPORARY TESTING ENDPOINT TO BE REMOVED LATER]
 # ==============================================================================
 @router.delete("/admin/clear-all", status_code=status.HTTP_200_OK)
-async def clear_entire_database(db: AsyncSession = Depends(get_db)):
+async def clear_entire_database(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(get_current_admin),
+):
     """[DEV ONLY] Temporary testing endpoint to truncate all tables in database."""
     await interview_service.clear_all_data(db)
     return {"message": "Database truncated successfully."}

@@ -47,7 +47,15 @@ async def stream_chat(
         ):
             yield f"data: {json.dumps(event)}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 @router.websocket("/{interview_id}/ws")
 async def websocket_chat(websocket: WebSocket, interview_id: str):

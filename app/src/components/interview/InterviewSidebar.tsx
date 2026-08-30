@@ -57,7 +57,7 @@ export const InterviewSidebar: React.FC<InterviewSidebarProps> = ({ session }) =
         </CardHeader>
         <CardContent className="space-y-3 text-xs">
           {session.cvFileName ? (
-            <div className="flex items-center gap-2 rounded-md bg-primary/5 p-2 text-primary">
+            <div className="flex items-center gap-2 rounded-md bg-muted/50 border border-border p-2 text-foreground">
               <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
               <span className="truncate font-medium">{session.cvFileName}</span>
             </div>

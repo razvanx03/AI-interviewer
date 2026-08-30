@@ -1,6 +1,6 @@
 export type ExperienceLevel = 'entry' | 'mid' | 'senior' | 'lead' | 'executive';
 
-export type InterviewStatus = 'draft' | 'active' | 'completed';
+export type InterviewStatus = 'draft' | 'active' | 'finishing' | 'completed';
 
 export interface ChatMessage {
   id: string;
@@ -28,6 +28,7 @@ export interface CandidateScreeningResult {
   summary: string;
   is_selected: boolean;
   cv_filename?: string;
+  cv_raw_text?: string;
 }
 
 export interface CandidateScreeningResponse {
@@ -47,6 +48,14 @@ export interface InterviewSession {
   candidatesPool?: CandidateItem[];
   screeningResults?: CandidateScreeningResult[];
   status: InterviewStatus;
+  activeQuestionNumber?: number | null;
+  activeQuestionText?: string | null;
+  activeQuestionStatus?: string;
+  topicsPlan?: string[];
+  assessedTopics?: string[];
+  timeLimitMinutes?: number | null;
+  language?: string;
+  conversationSummary?: string;
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];
@@ -63,4 +72,6 @@ export interface CreateInterviewInput {
   cvFile?: File | null;
   cvFileName?: string;
   cvRawText?: string;
+  timeLimitMinutes?: number | null;
+  language?: string;
 }

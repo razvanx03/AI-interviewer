@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from '@/components/layout/Sidebar';
+import { useAdminAuth } from '@/hooks/use-admin-auth';
 
 export interface AppLayoutContextType {
   isCollapsed: boolean;
@@ -13,6 +14,7 @@ export interface AppLayoutContextType {
 const SIDEBAR_COLLAPSE_KEY = 'ai-interviewer-sidebar-collapsed';
 
 export const AppLayout: React.FC = () => {
+  const { isAdmin } = useAdminAuth();
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     return localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === 'true';
   });
@@ -32,15 +34,17 @@ export const AppLayout: React.FC = () => {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background">
-      {/* 1. Left Sidebar with desktop collapse and mobile drawer support */}
-      <Sidebar
-        isCollapsed={isCollapsed}
-        onToggleCollapse={() => setIsCollapsed((prev) => !prev)}
-        mobileOpen={mobileOpen}
-        onMobileClose={() => setMobileOpen(false)}
-      />
+      {/* 1. Left Sidebar: Render ONLY when authenticated as Admin */}
+      {isAdmin && (
+        <Sidebar
+          isCollapsed={isCollapsed}
+          onToggleCollapse={() => setIsCollapsed((prev) => !prev)}
+          mobileOpen={mobileOpen}
+          onMobileClose={() => setMobileOpen(false)}
+        />
+      )}
 
-      {/* 2. Main Workspace Outlet */}
+      {/* 2. Main Workspace Outlet: Full width when Candidate Guest */}
       <div className="flex flex-1 flex-col overflow-hidden min-w-0 transition-all duration-200 ease-in-out">
         <Outlet
           context={

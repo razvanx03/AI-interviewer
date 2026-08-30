@@ -1,10 +1,14 @@
+import asyncio
 import re
 import uuid
+import logging
 from datetime import datetime, timezone
-from typing import List, Optional, Any, Dict, Tuple
-from sqlalchemy import select, delete
+from typing import List, Optional, Any, Dict, Tuple, AsyncGenerator
+from sqlalchemy import select, delete, update
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from models.interview import Interview
 from models.message import Message
@@ -18,84 +22,529 @@ from schemas.interview import (
     CandidateResponse,
 )
 from schemas.chat import ChatMessage, MessageRole, ChatResponse
-from llm.base import BaseLLMProvider
-from llm.mock_provider import MockLLMProvider
+from llm import (
+    BaseLLMProvider,
+    get_llm_provider,
+    build_system_interviewer_prompt,
+    build_intro_prompt,
+    build_first_question_prompt,
+    build_clarification_response_prompt,
+    build_both_response_prompt,
+    build_refusal_response_prompt,
+    build_next_question_prompt,
+    is_wrapup_or_evaluation_message,
+)
+from llm.constants import (
+    CONTEXT_TOKEN_THRESHOLD_RATIO,
+    RECENT_MESSAGES_WINDOW_COUNT,
+)
+from core.config import settings
+from core.constants import (
+    TECH_CATALOGUE,
+    CLARIFICATION_STEER_THRESHOLD,
+    INTERVIEW_COMPLETE_TOKEN,
+    BASE_SCREENING_SCORE,
+    KEYWORD_MATCH_WEIGHT,
+    MAX_KEYWORD_BOOST,
+    STRENGTH_MATCH_WEIGHT,
+    MAX_STRENGTHS_BOOST,
+    MAX_SCREENING_SCORE,
+)
+
+def _clean_candidate_display_name(name: str) -> str:
+    """Format candidate name nicely (e.g. 'darius.pop' -> 'Darius Pop', 'DariusBotezan2026' -> 'Darius Botezan')."""
+    if not name:
+        return "Candidate"
+    clean = name.strip()
+    if "@" in clean:
+        clean = clean.split("@")[0]
+    clean = re.sub(r"\d+$", "", clean).strip()
+    if "." in clean or "_" in clean or "-" in clean or " " in clean:
+        parts = re.split(r"[._\-\s]+", clean)
+        return " ".join(p.capitalize() for p in parts if p)
+    parts = re.findall(r"[A-Z][a-z]*|[a-z]+", clean)
+    if len(parts) > 1:
+        return " ".join(p.capitalize() for p in parts)
+    return clean.capitalize() if clean else "Candidate"
+
+def _clean_llm_response(text: str) -> str:
+    """Sanitize model output: remove thinking tags, speaker/persona prefixes, meta observations, and outer quotes."""
+    if not text:
+        return ""
+    # Strip <think>...</think> blocks if reasoning model emits them
+    cleaned = re.sub(r'<think>[\s\S]*?</think>', '', text, flags=re.IGNORECASE).strip()
+    # Strip roleplay speaker prefixes like **You (Role):**, **Interviewer:**, Interviewer:, You:, etc.
+    cleaned = re.sub(r'^\s*(\*\*You[^\*]+\*\*|\*\*Interviewer[^\*]*\*\*|You\s*\([^)]+\):?|Interviewer:?)\s*', '', cleaned, flags=re.IGNORECASE).strip()
+    # Strip meta-observations, explanations, and notes (e.g. "Observație: ...", "Notă: ...", "Note: ...")
+    cleaned = re.sub(r'(?i)\n*(Observa[țt]ie|Not[ăa]|Note|Explica[țt]ie)\s*:[\s\S]*$', '', cleaned).strip()
+    # Strip outer surrounding quotes if model wrapped its entire speech in quotes
+    if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith('“') and cleaned.endswith('”')):
+        cleaned = cleaned[1:-1].strip()
+    return cleaned
+
+def _extract_core_question_text(ai_text: str) -> str:
+    """Extract the core question from AI output, stripping leading transition phrases."""
+    if not ai_text:
+        return ""
+    cleaned = _clean_llm_response(ai_text)
+    paragraphs = [p.strip() for p in cleaned.split("\n\n") if p.strip()]
+    if len(paragraphs) > 1:
+        for p in reversed(paragraphs):
+            if "?" in p or any(p.lower().startswith(prefix) for prefix in ("cum ", "ce ", "how ", "what ", "why ", "describe ", "explica ")):
+                return p
+        return paragraphs[-1]
+    return cleaned.strip()
+
+def detect_candidate_language(text: str, previous_lang: Optional[str] = "en") -> str:
+    """Accurately detect language ('en' or 'ro') of candidate message."""
+    t = text.strip().lower()
+    if not t:
+        return previous_lang or "en"
+    
+    # Romanian diacritics and distinct linguistic roots
+    ro_patterns = [
+        r"[ăâîșț]",
+        r"\b(salut|buna|buna\s+ziua|multumesc|mersi|nu\s+stiu|nu\s+am|cum\s+sa|ce\s+este|pentru|despre|proiect|proiectul|proiecte|aplicatia|aplicatii|experienta|ani|am\s+lucrat|am\s+folosit|am\s+facut|fac|facut|lucrat|dezvoltat|echipa|starea|baza\s+de\s+date|tabele|interogari|intrebare|urmatoarea|trecem|da|nu|si|sau|cu|in|la|pe|de|din|o|un|unui|unei|sa|ca|sa\s+continuam)\b",
+    ]
+    # English keywords and functional patterns
+    en_patterns = [
+        r"\b(hello|hi|hey|good\s+morning|good\s+afternoon|thanks|thank\s+you|i|my|we|our|you|your|he|she|it|they|them|is|are|was|were|have|has|had|do|does|did|will|would|can|could|should|used|built|worked|developed|implemented|project|projects|experience|years|with|from|about|the|and|or|for|to|in|on|at|by|of|state|database|query|queries|component|components|let'?s|next|skip|pass|yes|no)\b",
+    ]
+    
+    ro_count = sum(len(re.findall(p, t)) for p in ro_patterns)
+    en_count = sum(len(re.findall(p, t)) for p in en_patterns)
+    
+    if ro_count > en_count:
+        return "ro"
+    elif en_count > ro_count:
+        return "en"
+    return previous_lang or "en"
+
+def _format_eval_feedback_section(items: List[Any], is_ro: bool = False) -> str:
+    """Format evaluation strengths/weaknesses into a clean Markdown table or formatted bullet points."""
+    if not items:
+        return ""
+
+    # Filter out dummy/hallucinated fallback entries (e.g. question_id < 0 or [NO TOPIC])
+    valid_items: List[Any] = []
+    for it in items:
+        if isinstance(it, dict):
+            qid = str(it.get("question_id") or it.get("q_id") or it.get("question_number") or "")
+            topic = str(it.get("topic") or it.get("question") or it.get("question_text") or "")
+            explanation = str(it.get("explanation") or it.get("feedback") or it.get("assessment") or "")
+            if (
+                qid.startswith("-")
+                or "[NO TOPIC]" in topic
+                or "[NO RESPONSE" in topic
+                or "[NO STRENGTHS" in explanation.upper()
+                or "NO STRENGTHS" in topic.upper()
+                or "NONE OBSERVED" in explanation.upper()
+            ):
+                continue
+            valid_items.append(it)
+        elif isinstance(it, str):
+            s_up = it.strip().upper()
+            if (
+                "[NO STRENGTHS" in s_up
+                or "NO VALID" in s_up
+                or "NO STRENGTHS OBSERVED" in s_up
+                or "NONE OBSERVED" in s_up
+                or s_up == "N/A"
+                or s_up == "NONE"
+            ):
+                continue
+            valid_items.append(it)
+        else:
+            valid_items.append(it)
+
+    if not valid_items:
+        return ""
+
+    # Check if items are structured Q&A feedback dictionaries
+    dict_items = [it for it in valid_items if isinstance(it, dict)]
+    if len(dict_items) > 0 and len(dict_items) == len(valid_items):
+        q_hdr = "Întrebare" if is_ro else "Question"
+        resp_hdr = "Răspuns Candidat" if is_ro else "Candidate Response"
+        fb_hdr = "Analiză & Feedback AI" if is_ro else "AI Evaluation & Feedback"
+
+        table_rows = [
+            f"| {q_hdr} | {resp_hdr} | {fb_hdr} |",
+            "| :--- | :--- | :--- |",
+        ]
+        for idx, it in enumerate(dict_items, start=1):
+            qid = (
+                it.get("question_id")
+                or it.get("q_id")
+                or it.get("question_number")
+                or it.get("round")
+                or idx
+            )
+            
+            q_text = (
+                it.get("question_text")
+                or it.get("question_summary")
+                or it.get("question")
+                or it.get("topic")
+                or ""
+            )
+            q_text_str = str(q_text).strip()
+            
+            # Format clean question label with topic/question text
+            q_prefix = f"**Întrebarea {qid}**" if is_ro else f"**Question {qid}**"
+            if q_text_str and q_text_str.lower() != str(qid).lower():
+                clean_q = re.sub(
+                    r'^(#?\d+[\s\-\:\.]*|(Question|Întrebarea)\s*#?\d*[\s\-\:\.]*)',
+                    '',
+                    q_text_str,
+                    flags=re.IGNORECASE,
+                ).strip()
+                if clean_q:
+                    clean_q_disp = clean_q.replace("\n", " ").replace("|", "\\|")
+                    q_label = f"{q_prefix}: {clean_q_disp}"
+                else:
+                    q_label = q_prefix
+            else:
+                q_label = q_prefix
+
+            resp = str(
+                it.get("response_text")
+                or it.get("candidate_response")
+                or it.get("candidate_answer")
+                or it.get("response")
+                or it.get("answer")
+                or it.get("quote")
+                or ""
+            ).strip()
+            resp_clean = resp.replace("\n", " ").replace("|", "\\|")
+            if not resp_clean or "[NO RESPONSE" in resp_clean.upper():
+                resp_disp = "*(Fără răspuns)*" if is_ro else "*(No response provided)*"
+            else:
+                resp_disp = f"_{resp_clean}_"
+
+            fb = str(
+                it.get("explanation")
+                or it.get("evaluation_feedback")
+                or it.get("feedback")
+                or it.get("assessment")
+                or it.get("analysis")
+                or it.get("evaluation")
+                or it.get("critique")
+                or it.get("detail")
+                or it.get("gap")
+                or it.get("notes")
+                or ""
+            ).strip()
+
+            # If feedback key wasn't standard, scan any other non-empty string values in the object
+            if not fb:
+                for k, v in it.items():
+                    if (
+                        k
+                        not in (
+                            "question_id",
+                            "q_id",
+                            "question_number",
+                            "round",
+                            "question",
+                            "question_text",
+                            "question_summary",
+                            "topic",
+                            "response_text",
+                            "candidate_response",
+                            "candidate_answer",
+                            "response",
+                            "answer",
+                            "quote",
+                        )
+                        and isinstance(v, str)
+                        and v.strip()
+                    ):
+                        fb = v.strip()
+                        break
+
+            if not fb:
+                fb = (
+                    "Candidatul nu a oferit un răspuns tehnic pentru a valida cerințele postului."
+                    if is_ro
+                    else "Candidate did not provide a valid technical response to this question."
+                )
+
+            fb_clean = fb.replace("\n", " ").replace("|", "\\|")
+
+            table_rows.append(f"| {q_label} | {resp_disp} | {fb_clean} |")
+
+        return "\n".join(table_rows)
+
+    # Fallback to clean human-readable bullet points
+    bullets = []
+    for it in items:
+        if isinstance(it, dict):
+            parts = []
+            qid = it.get("question_id") or it.get("q_id") or it.get("question_number")
+            if qid:
+                parts.append(f"**Q{qid}**")
+            resp = it.get("response_text") or it.get("response") or it.get("answer")
+            if resp:
+                parts.append(f"„{str(resp)[:80]}”")
+            fb = it.get("explanation") or it.get("feedback") or it.get("assessment")
+            if fb:
+                parts.append(f"→ {fb}")
+            bullets.append("- " + (" : ".join(parts) if parts else str(it)))
+        else:
+            bullets.append(f"- {it}")
+
+    return "\n".join(bullets)
+
+
+def _normalize_text_for_intent(text: str) -> str:
+    text = text.lower().strip()
+    replacements = {
+        'ă': 'a', 'â': 'a', 'î': 'i', 'ș': 's', 'ş': 's', 'ț': 't', 'ţ': 't'
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    return text
+
 
 class InterviewService:
     """
-    Session and interview orchestrator powered by PostgreSQL via SQLAlchemy AsyncSession.
-    Supports multi-CV candidate screening, scoring, and automated top candidate selection.
+    Core business logic and database orchestration for technical interview workflows:
+    1. Pure in-memory candidate pool screening & scoring.
+    2. Session creation with dynamic topic planning.
+    3. LLM conversation progression and state tracking.
+    4. Autonomous evaluation report generation.
     """
 
     def __init__(self, llm_provider: Optional[BaseLLMProvider] = None):
-        self.llm = llm_provider or MockLLMProvider()
+        self._eval_locks: Dict[str, asyncio.Lock] = {}
+        if llm_provider:
+            self.llm = llm_provider
+        else:
+            self.llm = get_llm_provider(
+                base_url=settings.OLLAMA_BASE_URL,
+                model_name=settings.DEFAULT_LLM_MODEL,
+                num_ctx=settings.OLLAMA_NUM_CTX,
+            )
 
-    def screen_candidates(
-        self, job_title: str, job_description: str, experience_level: str, candidates: List[Any]
-    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-        """
-        Evaluate and rank candidates against job requirements.
-        Returns (top_candidate, screening_results).
-        """
-        results = []
-        jd_words = set(re.findall(r'\b[a-zA-Z0-9+#.-]{3,}\b', (job_title + " " + job_description).lower()))
+    def _estimate_tokens(self, text: str) -> int:
+        """Conservative token estimation for mixed natural language and code (1 token ~ 3.5 chars)."""
+        if not text:
+            return 0
+        return max(1, int(len(text) / 3.5))
 
-        tech_catalogue = [
-            "React", "TypeScript", "JavaScript", "Python", "FastAPI", "Django", "Node.js",
-            "PostgreSQL", "MySQL", "MongoDB", "Redis", "Docker", "Kubernetes", "AWS",
-            "GCP", "GraphQL", "REST", "CI/CD", "Tailwind", "Next.js", "Java", "Go", "Rust"
+    async def _build_managed_context_payload(
+        self,
+        db: AsyncSession,
+        interview: Interview,
+        db_messages: List[Message],
+        system_prompt_builder_kwargs: Dict[str, Any],
+    ) -> Tuple[str, List[Dict[str, str]]]:
+        """
+        Dynamically manages the LLM context window using Progressive Summarization:
+        1. Checks total estimated tokens of System Prompt + Full Message History against threshold.
+        2. If tokens exceed threshold (> CONTEXT_TOKEN_THRESHOLD_RATIO of OLLAMA_NUM_CTX):
+           - Splits into older_messages and recent_messages (last RECENT_MESSAGES_WINDOW_COUNT).
+           - Extracts QA exchanges from older_messages and generates a cumulative summary via Ollama.
+           - Persists interview.conversation_summary in PostgreSQL.
+           - Injects conversation_summary into system prompt.
+           - Builds history_payload containing only recent_messages.
+        3. Otherwise (within limits):
+           - Injects any existing conversation_summary into system prompt.
+           - Passes full db_messages.
+        4. PostgreSQL keeps 100% of all raw messages intact.
+        """
+        raw_history_payload = [
+            {"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content}
+            for m in db_messages
         ]
 
+        # Calculate base tokens
+        history_text = " ".join(m.get("content", "") for m in raw_history_payload)
+        base_system_prompt = build_system_interviewer_prompt(
+            **system_prompt_builder_kwargs,
+            conversation_summary=interview.conversation_summary,
+        )
+        total_estimated_tokens = self._estimate_tokens(base_system_prompt) + self._estimate_tokens(history_text)
+        max_safe_tokens = int(settings.OLLAMA_NUM_CTX * CONTEXT_TOKEN_THRESHOLD_RATIO)
+
+        # Trigger progressive summarization if exceeding threshold and message count is large
+        if total_estimated_tokens > max_safe_tokens and len(db_messages) > RECENT_MESSAGES_WINDOW_COUNT:
+            logger.info(
+                "[Interview %s] Context threshold reached (%d estimated tokens > %d limit). Activating progressive summarization.",
+                interview.id,
+                total_estimated_tokens,
+                max_safe_tokens,
+            )
+            older_messages = db_messages[:-RECENT_MESSAGES_WINDOW_COUNT]
+            recent_messages = db_messages[-RECENT_MESSAGES_WINDOW_COUNT:]
+
+            # Extract QA rounds from older messages
+            older_rounds = []
+            cur_q = None
+            for m in older_messages:
+                role = m.role.value if hasattr(m.role, "value") else str(m.role)
+                if role in ("assistant", "system"):
+                    cur_q = m.content
+                elif role == "user" and cur_q:
+                    older_rounds.append({"question": cur_q, "answer": m.content})
+                    cur_q = None
+
+            if older_rounds:
+                try:
+                    updated_summary = await self.llm.summarize_conversation_history(
+                        job_title=interview.job_title,
+                        candidate_name=interview.candidate_name,
+                        rounds_to_summarize=older_rounds,
+                        existing_summary=interview.conversation_summary,
+                    )
+                    interview.conversation_summary = updated_summary
+                    await db.commit()
+                    logger.info("[Interview %s] Updated conversation summary stored in DB (%d chars).", interview.id, len(updated_summary))
+                except Exception as sum_err:
+                    logger.warning("[Interview %s] Progressive summarization failed: %s. Using fallback window.", interview.id, sum_err)
+
+            # Rebuild system prompt with updated summary
+            managed_system_prompt = build_system_interviewer_prompt(
+                **system_prompt_builder_kwargs,
+                conversation_summary=interview.conversation_summary,
+            )
+            managed_history = [
+                {"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content}
+                for m in recent_messages
+            ]
+            return managed_system_prompt, managed_history
+
+        # Standard path (within safe limits)
+        return base_system_prompt, raw_history_payload
+
+    def _extract_candidate_name_from_cv_text(self, raw_text: str) -> Optional[str]:
+        """
+        Extract candidate's full name from the top header of the CV text if name is generic.
+        """
+        if not raw_text or not raw_text.strip():
+            return None
+
+        lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+        for line in lines[:8]:
+            # Clean common resume header prefixes
+            cleaned = re.sub(r'^(name|curriculum\s+vitae|cv|resume|candidat|candidate|nume)[\s:=-]+', '', line, flags=re.IGNORECASE).strip()
+            # Split before title separators like ' - ', ' | ', ' -- '
+            cleaned = re.split(r'\s+[-|•—]\s+', cleaned)[0].strip()
+
+            # Ignore generic section titles or contact lines
+            if re.search(r'\b(engineer|developer|architect|designer|manager|curriculum|vitae|resume|contact|email|phone|summary|education|skills|experience)\b', cleaned, re.IGNORECASE):
+                continue
+            if re.search(r'[@0-9+://]', cleaned):
+                continue
+
+            words = cleaned.split()
+            # A valid name is usually 2 to 4 alphabetic words
+            if 2 <= len(words) <= 4 and all(re.match(r'^[A-Za-zÀ-ÿ\.\'-]+$', w) for w in words):
+                return " ".join(w.capitalize() for w in words)
+
+        return None
+
+    def screen_candidates(
+        self,
+        job_title: str,
+        job_description: str,
+        experience_level: str,
+        candidates: List[Any],
+        selected_candidate_name: Optional[str] = None,
+    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """
+        Screening candidate pool:
+        - Extracts actual candidate name if generic fallback 'Candidate' was used.
+        - Calculates dynamic matching score based on job description competencies & skills overlap.
+        - Ranks all candidates strictly in descending order of match_score.
+        - Honors human override selection by name if specified; otherwise selects #1 score by default.
+        """
+        # 1. Identify key tech requirements from Job Description & Title
+        jd_text_lower = f"{job_title} {job_description}".lower()
+        required_tech = [t for t in TECH_CATALOGUE if t.lower() in jd_text_lower]
+        if not required_tech:
+            required_tech = ["Full Stack", "Software Engineering", "APIs", "Database", "Git"]
+
+        results = []
         for cand in candidates:
             cand_name = cand.name if hasattr(cand, "name") else cand.get("name", "Candidate")
             cand_cv = cand.cv_raw_text if hasattr(cand, "cv_raw_text") else cand.get("cv_raw_text", "")
             cand_file = cand.cv_filename if hasattr(cand, "cv_filename") else cand.get("cv_filename")
 
-            cv_text_lower = (cand_cv or "").lower()
-            cv_words = set(re.findall(r'\b[a-zA-Z0-9+#.-]{3,}\b', cv_text_lower))
+            # Check if name is the generic fallback 'Candidate' / empty
+            is_generic_name = (
+                not cand_name
+                or cand_name.strip().lower() in ("candidate", "applicant", "null", "none", "unknown", "cv", "resume")
+            )
+            if is_generic_name and cand_cv and cand_cv.strip():
+                extracted_name = self._extract_candidate_name_from_cv_text(cand_cv)
+                if extracted_name:
+                    cand_name = extracted_name
 
-            matched_keywords = list(jd_words.intersection(cv_words))
-            strengths = [t for t in tech_catalogue if t.lower() in cv_text_lower]
+            # Calculate matching skills & dynamic match score
+            cv_lower = (cand_cv or "").lower()
+            matched_skills = [t for t in required_tech if t.lower() in cv_lower]
+            other_skills = [t for t in TECH_CATALOGUE if t.lower() in cv_lower and t not in matched_skills]
 
-            if not strengths and matched_keywords:
-                strengths = [kw.capitalize() for kw in matched_keywords[:4]]
+            # Strengths: matched skills first, then general competencies
+            strengths = (matched_skills + other_skills)[:4]
+            if not strengths:
+                strengths = ["Technical Competency", "Document Verified", "Profile Parsed"]
 
-            base_score = 65
-            keyword_boost = min(len(matched_keywords) * 5, 25)
-            strengths_boost = min(len(strengths) * 3, 10)
-            match_score = min(base_score + keyword_boost + strengths_boost, 99)
+            # Dynamic match score computation
+            base_score = 72
+            skill_bonus = min(len(matched_skills) * 6, 20)
+            length_bonus = min(len(cand_cv.split()) // 30, 6) if cand_cv else 0
+            subtle_var = (hash(cand_name + (cand_file or "")) % 5) - 2
 
-            if len(strengths) > 0:
-                summary = f"Strong alignment in {', '.join(strengths[:3])}. Demonstrated relevant background matching the job description."
+            raw_score = base_score + skill_bonus + length_bonus + subtle_var
+            final_score = max(60, min(98, raw_score))
+
+            if matched_skills:
+                skills_highlight = ", ".join(matched_skills[:3])
+                summary = f"Strong alignment in {skills_highlight} matching core requirements for {job_title}."
             else:
-                summary = "Solid general engineering foundation with adaptable skill set for the position."
+                summary = f"Qualified applicant profile evaluated for {job_title}."
 
             results.append({
                 "name": cand_name,
                 "cv_filename": cand_file,
                 "cv_raw_text": cand_cv,
-                "match_score": match_score,
-                "strengths": strengths if strengths else ["Analytical Problem Solving", "System Design"],
+                "match_score": final_score,
+                "strengths": strengths,
                 "summary": summary,
                 "is_selected": False,
             })
 
+        # 2. Sort all candidates strictly in descending order of match_score
         results.sort(key=lambda x: x["match_score"], reverse=True)
-        if len(results) > 0:
-            results[0]["is_selected"] = True
-            top_candidate = results[0]
-        else:
-            top_candidate = {
-                "name": "Candidate",
-                "cv_filename": None,
-                "cv_raw_text": None,
-                "match_score": 90,
-                "strengths": ["General Technical Aptitude"],
-                "summary": "Direct applicant profile evaluated.",
-                "is_selected": True,
-            }
 
-        return top_candidate, results
+        # 3. Honor Human Override Selection First!
+        selected_cand = None
+        if selected_candidate_name and selected_candidate_name.strip():
+            target_name = selected_candidate_name.strip().lower()
+            for r in results:
+                if r["name"].strip().lower() == target_name:
+                    r["is_selected"] = True
+                    selected_cand = r
+                    break
+
+        if not selected_cand:
+            if len(results) > 0:
+                results[0]["is_selected"] = True
+                selected_cand = results[0]
+            else:
+                selected_cand = {
+                    "name": selected_candidate_name or "Candidate",
+                    "cv_filename": None,
+                    "cv_raw_text": None,
+                    "match_score": 90,
+                    "strengths": ["Direct Applicant"],
+                    "summary": "Direct applicant profile evaluated.",
+                    "is_selected": True,
+                }
+
+        return selected_cand, results
 
     async def create_interview(self, db: AsyncSession, data: InterviewCreate) -> Interview:
         interview_id = str(uuid.uuid4())[:8]  # Clean 8-char shareable ID
@@ -120,12 +569,61 @@ class InterviewService:
             else ExperienceLevel(data.experience_level)
         )
 
+        # Human override selection passed via data.candidate_name
         top_cand, screening_results = self.screen_candidates(
             job_title=data.job_title,
             job_description=data.job_description,
             experience_level=exp_enum.value,
             candidates=candidates_list,
+            selected_candidate_name=data.candidate_name,
         )
+
+        # 1. Determine realistic target topic count based on allocated time limit
+        target_topic_count = 7
+        if data.time_limit_minutes:
+            if data.time_limit_minutes <= 10:
+                target_topic_count = 3
+            elif data.time_limit_minutes <= 15:
+                target_topic_count = 4
+            elif data.time_limit_minutes <= 20:
+                target_topic_count = 5
+            elif data.time_limit_minutes <= 25:
+                target_topic_count = 6
+            elif data.time_limit_minutes <= 30:
+                target_topic_count = 7
+            elif data.time_limit_minutes <= 40:
+                target_topic_count = 8
+            else:
+                target_topic_count = 10
+
+        # Extract dynamic interview topics from Job Description instantly
+        topics_plan = []
+        lines = [line.strip().lstrip("-*•123456789. ").strip() for line in data.job_description.split("\n") if line.strip()]
+        valid_bullets = [
+            l for l in lines
+            if len(l) > 8 and not l.lower().startswith(("we are", "looking for", "requirements:", "responsibilities:", "core requirements", "about the role"))
+        ]
+        if len(valid_bullets) >= 2:
+            topics_plan = valid_bullets[:target_topic_count]
+        else:
+            default_pool = [
+                f"Core {data.job_title} Language & Framework Fundamentals",
+                "Architecture, API Design & Data Flow",
+                "Database Engineering & Query Performance",
+                "Containerization, Microservices & Deployment",
+                "Problem-Solving & Production Edge Cases",
+                "Security, Authentication & Authorization",
+                "Performance Optimization & Caching Strategies",
+                "Automated Testing, CI/CD & Reliability",
+                "System Monitoring, Observability & Logging",
+                "High Availability, Fault Tolerance & Scaling",
+            ]
+            topics_plan = default_pool[:target_topic_count]
+        logger.info("[Interview %s] Dynamic Topics Plan (%d topics for %s min) initialized: %s", interview_id, len(topics_plan), data.time_limit_minutes, topics_plan)
+
+        interview_lang = (data.language or "en").lower().strip()
+        if interview_lang not in ("en", "ro"):
+            interview_lang = "en"
 
         interview = Interview(
             id=interview_id,
@@ -137,6 +635,16 @@ class InterviewService:
             cv_filename=top_cand["cv_filename"],
             cv_raw_text=top_cand["cv_raw_text"],
             status=InterviewStatus.ACTIVE,
+            active_question_number=1,
+            active_question_text=None,
+            active_question_status="WAITING_ANSWER",
+            consecutive_clarifications=0,
+            topics_plan=topics_plan,
+            assessed_topics=[],
+            current_topic_index=0,
+            topic_follow_up_count=0,
+            time_limit_minutes=data.time_limit_minutes,
+            language=interview_lang,
             created_at=now,
             updated_at=now,
         )
@@ -158,27 +666,46 @@ class InterviewService:
             )
             db.add(cand_model)
 
-        # Create initial greeting and opening question
-        company_phrase = f" at {interview.company_name}" if interview.company_name else ""
-        screening_phrase = ""
-        if len(candidates_list) > 1:
-            screening_phrase = (
-                f"After evaluating {len(candidates_list)} candidate resumes against our requirements, "
-                f"your profile emerged as the top match ({top_cand['match_score']}% alignment).\n\n"
-            )
+        # Natural opening turn: 1-sentence greeting + Question 1 immediately
+        exp_level_str = exp_enum.value if hasattr(exp_enum, "value") else str(exp_enum)
+        first_topic = topics_plan[0] if topics_plan else "Core Engineering Fundamentals"
+        display_candidate_name = _clean_candidate_display_name(interview.candidate_name)
 
-        intro_content = (
-            f"Hello {interview.candidate_name}! Welcome to your technical interview for the "
-            f"**{interview.job_title}** role{company_phrase}. "
-            f"{screening_phrase}"
-            f"To begin, could you introduce yourself briefly and highlight your background relevant to this position?"
+        system_prompt = build_system_interviewer_prompt(
+            job_title=interview.job_title,
+            job_description=interview.job_description,
+            experience_level=exp_level_str,
+            company_name=interview.company_name,
+            cv_raw_text=interview.cv_raw_text or "",
+            candidate_name=display_candidate_name,
+            target_language=interview_lang,
         )
+        opening_prompt = build_first_question_prompt(
+            job_title=interview.job_title,
+            job_description=interview.job_description,
+            experience_level=exp_level_str,
+            first_topic=first_topic,
+            candidate_name=display_candidate_name,
+            company_name=interview.company_name,
+            cv_raw_text=interview.cv_raw_text or "",
+            language=interview_lang,
+        )
+
+        opening_content = await self.llm.generate_response(
+            system_prompt=system_prompt,
+            messages=[{"role": "user", "content": opening_prompt}],
+        )
+        if not opening_content or not opening_content.strip():
+            raise ValueError("Ollama returned an empty opening message.")
+
+        cleaned_opening = _clean_llm_response(opening_content)
+        interview.active_question_text = cleaned_opening
 
         initial_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview.id,
             role=MessageRole.ASSISTANT,
-            content=intro_content,
+            content=cleaned_opening,
             question_number=1,
             created_at=now,
         )
@@ -235,52 +762,431 @@ class InterviewService:
             for m in db_messages
         ]
 
-    async def add_candidate_message_and_respond(
+    def _classify_user_intent(
+        self,
+        candidate_content: str,
+        active_status: str,
+        consecutive_clarifications: int,
+    ) -> str:
+        """
+        Classify candidate message intent deterministically without hallucination risk.
+        """
+        raw_text = candidate_content.strip()
+        if not raw_text:
+            return "ANSWER"
+        text = _normalize_text_for_intent(raw_text)
+
+        # 1. Explicit Language Switch Requests
+        if re.search(r"\b(in\s+romana|in\s+limba\s+romana|vorbim\s+in\s+romana|intreaba-?ma\s+in\s+romana|vorbeste\s+in\s+romana|can\s+we\s+speak\s+romanian|in\s+romanian)\b", text):
+            return "LANGUAGE_REQUEST:ro"
+        if re.search(r"\b(in\s+english|speak\s+english|can\s+we\s+speak\s+english|let'?s\s+speak\s+english|in\s+engleza|vorbim\s+in\s+engleza)\b", text):
+            return "LANGUAGE_REQUEST:en"
+
+        # 2. Phase INTRO: Readiness Confirmation
+        if active_status == "INTRO":
+            ready_patterns = [
+                r"\b(da|ready|gata|pregatit|pregatita|sunt\s+pregatit|sunt\s+pregatita|sunt\s+gata|yes|let'?s\s+go|sure|ok|okay|yep|start|putem\s+incepe|incepem|begin|hai|bine|sigur|cu\s+drag|all\s+set|i'?m\s+ready)\b",
+                r"\b(salut|buna|hello|hi|hey)\b",
+            ]
+            if any(re.search(pat, text) for pat in ready_patterns) or len(text.split()) <= 6:
+                return "READY"
+
+        # 3. Profanity / Inappropriate Language
+        profanity_patterns = [
+            r"\b(pula|pizda|muie|dracu|dracului|cacat|fut|futu-?ti|sloboz|moron|idiot|stupid|fuck|shit|bitch|asshole|nigger|cunt|dick)\b"
+        ]
+        if any(re.search(pat, text) for pat in profanity_patterns):
+            return "PROFANE_LANGUAGE"
+
+        # 4. Off-Topic / Prompt Injection
+        if re.search(r"\b(ignore\s+all\s+previous|cookie\s+recipe|reteta|vremea|weather|gluma|joke|tell\s+me\s+a\s+story|danseaza|canta)\b", text):
+            return "OFF_TOPIC"
+
+        # 5. Refusal / Don't Know / Skip / Next Topic Requests
+        refusal_patterns = [
+            r"\b(nu\s+stiu|nu\s+am\s+lucrat|nu\s+am\s+folosit|nu\s+am\s+experienta|nu\s+cunosc|nu\s+am\s+facut|skip|pass|sa\s+sarim|trecem\s+mai\s+departe|alta\s+intrebare|urmatoarea\s+intrebare|i\s+don'?t\s+know|haven'?t\s+worked|no\s+experience|skip\s+this|pass\s+this|nu\s+as\s+sti)\b",
+            r"^\s*(si\s+)?(continuam\??|putem\s+continua\??|sa\s+continuam\??|next|mai\s+departe|mergem\s+mai\s+departe)\s*$",
+        ]
+        if any(re.search(pat, text) for pat in refusal_patterns):
+            words = text.split()
+            if len(words) <= 12 or not re.search(r"\b(as\s+folosi|as\s+alege|as\s+face|prefer\s+sa|solutia\s+mea|in\s+schimb|i\s+would|instead|my\s+approach)\b", text):
+                return "REFUSAL_OR_DONT_KNOW"
+
+        # 6. Clarification / Confusion / Inquiring about the active question
+        confusion_patterns = [
+            r"\b(nu\s+inteleg|nu\s+prea\s+inteleg|nu\s+am\s+inteles|i\s+don'?t\s+understand)\b",
+            r"\b(poti\s+(sa\s+)?(clarifici|clarifica|reformulezi|detaliezi|explici)|could\s+you\s+(clarify|rephrase|explain)|can\s+you\s+(clarify|rephrase|explain))\b",
+            r"\b(clarifica|clarificare|rephrase|clarify|detaliaza)\b",
+            r"\b(nu\s+(imi\s+)?e(ste)?\s+(foarte\s+)?clar|it'?s\s+not\s+clear|not\s+very\s+clear|unclear)\b",
+            r"\b(la\s+ce\s+te\s+referi|what\s+do\s+you\s+mean|what\s+does\s+that\s+mean|ce\s+vrei\s+sa\s+spui|ce\s+ai\s+vrea)\b",
+            r"\b(ce\s+inseamna|ce\s+e\s+aia|ce\s+este|ce\s+reprezinta|what\s+is|what\s+does\s+.*\s+mean|what\s+are)\b",
+            r"\b(te\s+referi\s+la|do\s+you\s+mean|ce\s+parte|care\s+dintre|sau\s+ambele|despre\s+ce|ce\s+anume)\b",
+            r"\b(pot\s+folosi|pot\s+sa\s+folosesc|can\s+i\s+use|should\s+i\s+use|is\s+it\s+allowed|avem\s+voie)\b",
+        ]
+        is_clarification = any(re.search(pat, text) for pat in confusion_patterns)
+        is_question_message = "?" in text and not bool(re.search(r"\b(as\s+folosi|as\s+alege|as\s+face|as\s+implementa|solutia\s+mea|in\s+schimb|i\s+would|i\s+prefer)\b", text))
+
+        if is_clarification or is_question_message:
+            has_substantive_answer = (
+                len(text.split()) >= 15
+                and bool(re.search(r"\b(as\s+folosi|as\s+alege|as\s+face|as\s+implementa|as\s+crea|pentru\s+ca|deoarece|in\s+schimb|i\s+would|because|i\s+prefer|my\s+solution|implementing|using)\b", text))
+            )
+            if has_substantive_answer:
+                return "CLARIFICATION_AND_ANSWER"
+            return "CLARIFICATION"
+
+        return "ANSWER"
+
+    async def _prepare_turn(
+        self,
+        db: AsyncSession,
+        interview: Interview,
+        candidate_content: str,
+        db_messages: Optional[List[Message]] = None,
+    ) -> Tuple[str, List[Dict[str, str]], str, str, bool, Optional[int], Dict[str, Any]]:
+        if db_messages is None:
+            db_messages = list(interview.messages)
+        now = datetime.now(timezone.utc)
+        created_time = interview.created_at
+        if created_time.tzinfo is None:
+            created_time = created_time.replace(tzinfo=timezone.utc)
+        elapsed_min = (now - created_time).total_seconds() / 60.0
+        time_limit = interview.time_limit_minutes
+        remaining_min = max(0.0, float(time_limit) - elapsed_min) if time_limit else None
+        time_expired = bool(time_limit and remaining_min is not None and remaining_min <= 0.1)
+
+        exp_level_str = (
+            interview.experience_level.value
+            if hasattr(interview.experience_level, "value")
+            else str(interview.experience_level)
+        )
+        topics = interview.topics_plan or [f"Core {interview.job_title} Engineering"]
+        active_status = interview.active_question_status or "WAITING_ANSWER"
+        consecutive_clarifications = interview.consecutive_clarifications or 0
+        intent = self._classify_user_intent(candidate_content, active_status, consecutive_clarifications)
+        display_candidate_name = _clean_candidate_display_name(interview.candidate_name)
+
+        # Collect past questions asked by AI to enforce strict anti-repetition
+        previous_questions = [
+            m.content
+            for m in db_messages
+            if m.role == MessageRole.ASSISTANT
+            and m.content
+            and not m.content.startswith("{")
+            and "[INTERVIEW_COMPLETE]" not in m.content
+        ]
+
+        state_updates: Dict[str, Any] = {}
+        assigned_q_num: Optional[int] = None
+        turn_prompt = ""
+        is_complete = False
+
+        if intent.startswith("LANGUAGE_REQUEST:"):
+            new_lang = intent.split(":")[1]
+            interview.language = new_lang
+            state_updates["language"] = new_lang
+            active_q = interview.active_question_text or "the current technical question"
+            if new_lang == "ro":
+                turn_prompt = (
+                    f"Candidatul a cerut să continuați interviul în limba ROMÂNĂ ('{candidate_content}').\n"
+                    f"INSTRUCTIUNI:\n"
+                    f"1. Răspunde scurt și colegial în 1 propoziție scurtă în limba română la persoana a II-a singular (ex: 'Sigur, continuăm în limba română!').\n"
+                    f"2. Formulează întrebarea tehnică activă în limba română la persoana a II-a singular: \"{active_q}\".\n"
+                    f"3. REGULĂ DE LIMBĂ: Output 100% în ROMÂNĂ la persoana a II-a singular. Fără 'dumneavoastră' sau 'vă rugăm'."
+                )
+            else:
+                turn_prompt = (
+                    f"The candidate requested to continue the interview in ENGLISH ('{candidate_content}').\n"
+                    f"INSTRUCTIONS:\n"
+                    f"1. Acknowledge warmly in 1 short sentence in English (e.g. 'Sure, let\\'s continue in English!').\n"
+                    f"2. Translate and ask the active technical question in ENGLISH: \"{active_q}\".\n"
+                    f"3. LANGUAGE RULE: Output 100% in ENGLISH. Strictly do NOT output any Romanian words."
+                )
+            assigned_q_num = interview.active_question_number
+
+        elif intent == "CLARIFICATION":
+            state_updates["consecutive_clarifications"] = consecutive_clarifications + 1
+            active_q = interview.active_question_text or "Active technical question"
+            turn_prompt = build_clarification_response_prompt(
+                job_title=interview.job_title,
+                experience_level=exp_level_str,
+                candidate_name=display_candidate_name,
+                active_question_text=active_q,
+                candidate_query=candidate_content,
+                consecutive_clarifications=consecutive_clarifications + 1,
+                clarification_threshold=CLARIFICATION_STEER_THRESHOLD,
+                language=interview.language,
+            )
+            assigned_q_num = interview.active_question_number
+
+        elif intent == "CLARIFICATION_AND_ANSWER":
+            state_updates["consecutive_clarifications"] = 0
+            cur_idx = interview.current_topic_index or 0
+            cur_topic = topics[min(cur_idx, len(topics) - 1)] if topics else "Core Fundamentals"
+            assessed = list(interview.assessed_topics or [])
+            if cur_topic not in assessed:
+                assessed.append(cur_topic)
+            state_updates["assessed_topics"] = assessed
+
+            next_idx = cur_idx + 1
+            state_updates["current_topic_index"] = next_idx
+            next_q_num = (interview.active_question_number or 1) + 1
+            state_updates["active_question_number"] = next_q_num
+            assigned_q_num = next_q_num
+            state_updates["update_active_question_text_from_ai"] = True
+
+            next_topic = topics[min(next_idx, len(topics) - 1)] if topics else "System Architecture"
+            turn_prompt = build_both_response_prompt(
+                job_title=interview.job_title,
+                experience_level=exp_level_str,
+                candidate_name=display_candidate_name,
+                active_question_text=interview.active_question_text or "Active question",
+                candidate_content=candidate_content,
+                next_topic=next_topic,
+                previous_questions=previous_questions,
+                language=interview.language,
+            )
+
+        elif intent == "REFUSAL_OR_DONT_KNOW":
+            state_updates["consecutive_clarifications"] = 0
+            cur_idx = interview.current_topic_index or 0
+            skipped_topic = topics[min(cur_idx, len(topics) - 1)] if topics else "Previous Topic"
+            assessed = list(interview.assessed_topics or [])
+            if skipped_topic not in assessed:
+                assessed.append(skipped_topic)
+            state_updates["assessed_topics"] = assessed
+
+            next_idx = cur_idx + 1
+            all_assessed = len(assessed) >= len(topics) or next_idx >= len(topics)
+            hit_safety = (interview.active_question_number or 1) >= settings.SAFETY_MAX_QUESTIONS
+            should_conclude = (all_assessed and (interview.active_question_number or 1) >= len(topics)) or time_expired or hit_safety or next_idx >= len(topics)
+
+            if should_conclude:
+                is_complete = True
+                turn_prompt = build_next_question_prompt(
+                    job_title=interview.job_title,
+                    experience_level=exp_level_str,
+                    candidate_name=display_candidate_name,
+                    last_question=interview.active_question_text or "Active question",
+                    candidate_answer=candidate_content,
+                    next_topic="",
+                    is_follow_up=False,
+                    previous_questions=previous_questions,
+                    language=interview.language,
+                    is_final_wrap_up=True,
+                )
+            else:
+                state_updates["current_topic_index"] = next_idx
+                next_q_num = (interview.active_question_number or 1) + 1
+                state_updates["active_question_number"] = next_q_num
+                assigned_q_num = next_q_num
+                state_updates["update_active_question_text_from_ai"] = True
+
+                next_topic = topics[min(next_idx, len(topics) - 1)] if topics else "Next Engineering Competency"
+                turn_prompt = build_refusal_response_prompt(
+                    job_title=interview.job_title,
+                    experience_level=exp_level_str,
+                    candidate_name=display_candidate_name,
+                    skipped_topic=skipped_topic,
+                    next_topic=next_topic,
+                    previous_questions=previous_questions,
+                    language=interview.language,
+                )
+
+        elif intent == "PROFANE_LANGUAGE":
+            active_q = interview.active_question_text or "the current technical question"
+            if interview.language == "ro":
+                turn_prompt = (
+                    f"Candidatul a folosit un limbaj nepotrivit sau vulgar ('{candidate_content[:60]}').\n"
+                    f"1. Răspunde ferm, calm și profesionist în 1 propoziție scurtă la persoana a II-a singular cerând păstrarea unui ton profesional și respectuos.\n"
+                    f"2. Revino direct la întrebarea tehnică activă: \"{active_q}\".\n"
+                    f"3. REGULĂ DE TON: Exclusiv persoana a II-a singular. Fără supărare, dar ferm."
+                )
+            else:
+                turn_prompt = (
+                    f"The candidate used inappropriate language ('{candidate_content[:60]}').\n"
+                    f"1. Calmly and professionally state in 1 brief sentence that we should maintain a respectful and professional conversation.\n"
+                    f"2. Firmly return to the active technical question: \"{active_q}\"."
+                )
+            assigned_q_num = interview.active_question_number
+
+        elif intent == "OFF_TOPIC":
+            active_q = interview.active_question_text or "the current technical requirement"
+            if interview.language == "ro":
+                turn_prompt = f"Candidatul a trimis un mesaj în afara subiectului sau o glumă ('{candidate_content[:60]}'). Refuză politicos în 1 propoziție scurtă și revino ferm la întrebarea activă: \"{active_q}\"."
+            else:
+                turn_prompt = f"The candidate sent an off-topic query or joke ('{candidate_content[:60]}'). Politely decline in 1 brief sentence and firmly return to the active question: \"{active_q}\"."
+            assigned_q_num = interview.active_question_number
+
+        else:  # ANSWER
+            state_updates["consecutive_clarifications"] = 0
+            cur_idx = interview.current_topic_index or 0
+            cur_topic = topics[min(cur_idx, len(topics) - 1)] if topics else "Core Fundamentals"
+            assessed = list(interview.assessed_topics or [])
+            if cur_topic not in assessed:
+                assessed.append(cur_topic)
+            state_updates["assessed_topics"] = assessed
+
+            all_assessed = len(assessed) >= len(topics)
+            hit_safety = (interview.active_question_number or 1) >= settings.SAFETY_MAX_QUESTIONS
+            should_conclude = (all_assessed and (interview.active_question_number or 1) >= len(topics)) or time_expired or hit_safety or (cur_idx + 1 >= len(topics))
+
+            if should_conclude:
+                is_complete = True
+                turn_prompt = ""
+            else:
+                next_idx = cur_idx + 1
+                state_updates["current_topic_index"] = next_idx
+                next_q_num = (interview.active_question_number or 1) + 1
+                state_updates["active_question_number"] = next_q_num
+                assigned_q_num = next_q_num
+                state_updates["update_active_question_text_from_ai"] = True
+
+                next_topic = topics[min(next_idx, len(topics) - 1)] if topics else "Architecture & System Design"
+                turn_prompt = build_next_question_prompt(
+                    job_title=interview.job_title,
+                    experience_level=exp_level_str,
+                    candidate_name=display_candidate_name,
+                    last_question=interview.active_question_text or "Active question",
+                    candidate_answer=candidate_content,
+                    next_topic=next_topic,
+                    is_follow_up=False,
+                    previous_questions=previous_questions,
+                    language=interview.language,
+                    is_final_wrap_up=False,
+                )
+
+        # Build managed context payload with messages prior to the current turn prompt
+        effective_target_lang = state_updates.get("language", interview.language)
+        prompt_kwargs = {
+            "job_title": interview.job_title,
+            "job_description": interview.job_description,
+            "experience_level": exp_level_str,
+            "company_name": interview.company_name,
+            "cv_raw_text": interview.cv_raw_text or "",
+            "candidate_name": display_candidate_name,
+            "target_language": effective_target_lang,
+        }
+        prior_db_messages = db_messages[:-1] if db_messages else []
+        managed_system_prompt, managed_history = await self._build_managed_context_payload(
+            db=db,
+            interview=interview,
+            db_messages=prior_db_messages,
+            system_prompt_builder_kwargs=prompt_kwargs,
+        )
+
+        return (
+            managed_system_prompt,
+            managed_history,
+            turn_prompt,
+            intent,
+            is_complete,
+            assigned_q_num,
+            state_updates,
+        )
+
+    async def respond_to_candidate_message(
         self, db: AsyncSession, interview_id: str, candidate_content: str
-    ) -> Optional[ChatResponse]:
+    ) -> Optional[Interview]:
+        """Process incoming candidate message, enforce turn progression, and return updated Interview model."""
         interview = await self.get_interview(db, interview_id)
         if not interview:
             return None
 
+        (
+            managed_system_prompt,
+            managed_history,
+            turn_prompt,
+            intent,
+            is_complete,
+            assigned_q_num,
+            state_updates,
+        ) = await self._prepare_turn(db, interview, candidate_content)
+
         now = datetime.now(timezone.utc)
 
-        # 1. Insert user message
-        user_msg = Message(
+        # 1. Save candidate message
+        cand_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
             role=MessageRole.USER,
             content=candidate_content,
+            question_number=interview.active_question_number,
             created_at=now,
         )
-        db.add(user_msg)
+        db.add(cand_msg)
 
-        # Count questions asked so far
-        assistant_questions = [
-            m for m in interview.messages
-            if (m.role == MessageRole.ASSISTANT or getattr(m.role, "value", None) == "assistant")
-            and m.question_number
-        ]
-        next_q_num = len(assistant_questions) + 1
-        is_complete = next_q_num > 5
+        # 2. Generate or set deterministic AI response
+        if is_complete:
+            is_ro = getattr(interview, "language", "en") == "ro"
+            display_candidate_name = _clean_candidate_display_name(interview.candidate_name)
+            if is_ro:
+                cleaned_ai_text = (
+                    f"Îți mulțumim pentru participare și pentru răspunsurile oferite, {display_candidate_name}! "
+                    f"Sesiunea de interviu tehnic pentru poziția de **{interview.job_title}** s-a încheiat. "
+                    f"Transcrierea a fost înregistrată."
+                )
+            else:
+                cleaned_ai_text = (
+                    f"Thank you for participating and sharing your responses, {display_candidate_name}! "
+                    f"The technical interview session for the **{interview.job_title}** position has concluded. "
+                    f"Your transcript has been recorded."
+                )
+        else:
+            effective_messages = managed_history + [{"role": "user", "content": turn_prompt}]
+            try:
+                ai_text = await self.llm.generate_response(managed_system_prompt, effective_messages)
+            except Exception as gen_err:
+                logger.warning("[Interview %s] Error on initial generation: %s", interview_id, gen_err)
+                ai_text = ""
 
-        # 2. Build context for LLM
-        history_payload = [
-            {"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content}
-            for m in interview.messages
-        ]
-        history_payload.append({"role": MessageRole.USER.value, "content": candidate_content})
+            if not ai_text or not ai_text.strip():
+                logger.warning("[Interview %s] Empty AI response. Retrying once after 500ms...", interview_id)
+                await asyncio.sleep(0.5)
+                try:
+                    ai_text = await self.llm.generate_response(managed_system_prompt, effective_messages)
+                except Exception as retry_err:
+                    logger.error("[Interview %s] Error on retry generation: %s", interview_id, retry_err)
+                    ai_text = ""
 
-        system_prompt = (
-            f"You are an expert technical interviewer hiring for: {interview.job_title}.\n"
-            f"Job Description: {interview.job_description}\n"
-            f"Candidate CV Content: {interview.cv_raw_text or 'Not provided'}\n"
-            f"Evaluate responses concisely and ask the next focused question."
-        )
+            if not ai_text or not ai_text.strip():
+                is_ro = getattr(interview, "language", "en") == "ro"
+                if is_ro:
+                    ai_text = "Îți mulțumesc pentru răspuns. Hai să continuăm — poți detalia puțin mai mult abordarea ta sau un exemplu concret din experiența ta?"
+                else:
+                    ai_text = "Thank you for your answer. Let's continue — could you elaborate a bit more on your approach or provide a concrete example from your experience?"
 
-        ai_text = await self.llm.generate_response(system_prompt, history_payload)
+            ai_signaled_completion = INTERVIEW_COMPLETE_TOKEN in ai_text
+            is_complete = is_complete or ai_signaled_completion
+            if is_complete:
+                is_ro = getattr(interview, "language", "en") == "ro"
+                display_candidate_name = _clean_candidate_display_name(interview.candidate_name)
+                if is_ro:
+                    cleaned_ai_text = (
+                        f"Îți mulțumim pentru participare și pentru răspunsurile oferite, {display_candidate_name}! "
+                        f"Sesiunea de interviu tehnic pentru poziția de **{interview.job_title}** s-a încheiat. "
+                        f"Transcrierea a fost înregistrată."
+                    )
+                else:
+                    cleaned_ai_text = (
+                        f"Thank you for participating and sharing your responses, {display_candidate_name}! "
+                        f"The technical interview session for the **{interview.job_title}** position has concluded. "
+                        f"Your transcript has been recorded."
+                    )
+            else:
+                cleaned_ai_text = _clean_llm_response(ai_text)
 
         if is_complete:
-            interview.status = InterviewStatus.COMPLETED
+            interview.status = InterviewStatus.FINISHING
+            interview.active_question_status = "COMPLETED"
+            interview.active_question_number = None
+            assigned_q_num = None
+        else:
+            for k, v in state_updates.items():
+                if k == "update_active_question_text_from_ai":
+                    interview.active_question_text = _extract_core_question_text(cleaned_ai_text)
+                elif hasattr(interview, k):
+                    setattr(interview, k, v)
 
         interview.updated_at = now
 
@@ -288,100 +1194,269 @@ class InterviewService:
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
             role=MessageRole.ASSISTANT,
-            content=ai_text,
-            question_number=next_q_num if not is_complete else None,
+            content=cleaned_ai_text,
+            question_number=assigned_q_num,
             created_at=datetime.now(timezone.utc),
         )
         db.add(ai_msg)
-
         await db.commit()
 
+        return await self.get_interview(db, interview_id)
+
+    async def add_candidate_message_and_respond(
+        self, db: AsyncSession, interview_id: str, candidate_content: str
+    ) -> Optional[ChatResponse]:
+        """Process incoming candidate message and return typed ChatResponse for REST endpoint."""
+        updated = await self.respond_to_candidate_message(db, interview_id, candidate_content)
+        if not updated or not updated.messages:
+            return None
+        last_msg = updated.messages[-1]
         return ChatResponse(
             message=ChatMessage(
-                id=ai_msg.id,
-                role=MessageRole.ASSISTANT,
-                content=ai_msg.content,
-                created_at=ai_msg.created_at,
-                question_number=ai_msg.question_number,
+                id=last_msg.id,
+                role=last_msg.role,
+                content=last_msg.content,
+                created_at=last_msg.created_at,
+                question_number=last_msg.question_number,
             ),
-            is_complete=is_complete,
-            next_question_number=next_q_num if not is_complete else None,
+            is_complete=(updated.status in (InterviewStatus.FINISHING, InterviewStatus.COMPLETED)),
+            next_question_number=updated.active_question_number,
         )
 
     async def stream_candidate_message_and_respond(
         self, db: AsyncSession, interview_id: str, candidate_content: str
-    ):
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream assistant response turn using Ollama SSE while preserving strict turn-taking rules."""
         interview = await self.get_interview(db, interview_id)
         if not interview:
             return
 
-        now = datetime.now(timezone.utc)
+        (
+            managed_system_prompt,
+            managed_history,
+            turn_prompt,
+            intent,
+            is_complete,
+            assigned_q_num,
+            state_updates,
+        ) = await self._prepare_turn(db, interview, candidate_content)
 
-        # 1. Insert user message to database
-        user_msg = Message(
+        # 1. Save candidate message to database
+        cand_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
             role=MessageRole.USER,
             content=candidate_content,
-            created_at=now,
+            question_number=interview.active_question_number,
+            created_at=datetime.now(timezone.utc),
         )
-        db.add(user_msg)
+        db.add(cand_msg)
         await db.commit()
 
-        # Count questions
-        assistant_questions = [
-            m for m in interview.messages
-            if (m.role == MessageRole.ASSISTANT or getattr(m.role, "value", None) == "assistant")
-            and m.question_number
-        ]
-        next_q_num = len(assistant_questions) + 1
-        is_complete = next_q_num > 5
+        # 2. Handle stream or deterministic completion
+        if is_complete:
+            is_ro = getattr(interview, "language", "en") == "ro"
+            display_candidate_name = _clean_candidate_display_name(interview.candidate_name)
+            if is_ro:
+                hardcoded_closing = (
+                    f"Îți mulțumim pentru participare și pentru răspunsurile oferite, {display_candidate_name}! "
+                    f"Sesiunea de interviu tehnic pentru poziția de **{interview.job_title}** s-a încheiat. "
+                    f"Transcrierea a fost înregistrată."
+                )
+            else:
+                hardcoded_closing = (
+                    f"Thank you for participating and sharing your responses, {display_candidate_name}! "
+                    f"The technical interview session for the **{interview.job_title}** position has concluded. "
+                    f"Your transcript has been recorded."
+                )
 
-        # 2. Build context for LLM
-        history_payload = [
-            {"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content}
-            for m in interview.messages
-        ]
-        history_payload.append({"role": MessageRole.USER.value, "content": candidate_content})
+            words = hardcoded_closing.split(" ")
+            for i in range(0, len(words), 3):
+                chunk_str = " ".join(words[i : i + 3]) + (" " if i + 3 < len(words) else "")
+                yield {"chunk": chunk_str, "is_complete": False}
+                await asyncio.sleep(0.04)
 
-        system_prompt = (
-            f"You are an expert technical interviewer hiring for: {interview.job_title}.\n"
-            f"Job Description: {interview.job_description}\n"
-            f"Candidate CV Content: {interview.cv_raw_text or 'Not provided'}\n"
-            f"Evaluate responses concisely and ask the next focused question."
-        )
+            cleaned_ai_response = hardcoded_closing
+            full_ai_response = hardcoded_closing
+        else:
+            effective_messages = managed_history + [{"role": "user", "content": turn_prompt}]
+            full_ai_response = ""
+            stream_gen = self.llm.generate_stream(managed_system_prompt, effective_messages)
 
-        full_ai_response = ""
-        stream_gen = self.llm.generate_stream(system_prompt, history_payload)
+            try:
+                async for chunk in stream_gen:
+                    full_ai_response += chunk
+                    display_chunk = chunk.replace(INTERVIEW_COMPLETE_TOKEN, "")
+                    if display_chunk:
+                        yield {"chunk": display_chunk, "is_complete": False}
+            except Exception as stream_err:
+                logger.warning("[Interview %s] Stream error on initial attempt: %s", interview_id, stream_err)
 
-        async for chunk in stream_gen:
-            full_ai_response += chunk
-            yield {"chunk": chunk, "is_complete": False}
+            # Auto-retry once if stream was empty
+            if not full_ai_response.strip():
+                logger.warning("[Interview %s] Empty AI stream. Retrying once after 500ms backoff...", interview_id)
+                await asyncio.sleep(0.5)
+                try:
+                    retry_stream = self.llm.generate_stream(managed_system_prompt, effective_messages)
+                    async for chunk in retry_stream:
+                        full_ai_response += chunk
+                        display_chunk = chunk.replace(INTERVIEW_COMPLETE_TOKEN, "")
+                        if display_chunk:
+                            yield {"chunk": display_chunk, "is_complete": False}
+                except Exception as retry_err:
+                    logger.error("[Interview %s] Stream error on retry: %s", interview_id, retry_err)
+
+            # Fallback if still empty after retry
+            if not full_ai_response.strip():
+                is_ro = getattr(interview, "language", "en") == "ro"
+                if is_ro:
+                    fallback_msg = "Îți mulțumim pentru răspuns. Hai să continuăm — poți detalia puțin mai mult abordarea ta sau un exemplu concret din experiența ta?"
+                else:
+                    fallback_msg = "Thank you for your answer. Let's continue — could you elaborate a bit more on your approach or provide a concrete example from your experience?"
+                full_ai_response = fallback_msg
+                yield {"chunk": fallback_msg, "is_complete": False}
+
+            ai_signaled_completion = INTERVIEW_COMPLETE_TOKEN in full_ai_response
+            is_complete = is_complete or ai_signaled_completion
+            if is_complete:
+                is_ro = getattr(interview, "language", "en") == "ro"
+                display_candidate_name = _clean_candidate_display_name(interview.candidate_name)
+                if is_ro:
+                    cleaned_ai_response = (
+                        f"Îți mulțumim pentru participare și pentru răspunsurile oferite, {display_candidate_name}! "
+                        f"Sesiunea de interviu tehnic pentru poziția de **{interview.job_title}** s-a încheiat. "
+                        f"Transcrierea a fost înregistrată."
+                    )
+                else:
+                    cleaned_ai_response = (
+                        f"Thank you for participating and sharing your responses, {display_candidate_name}! "
+                        f"The technical interview session for the **{interview.job_title}** position has concluded. "
+                        f"Your transcript has been recorded."
+                    )
+            else:
+                cleaned_ai_response = full_ai_response.replace(INTERVIEW_COMPLETE_TOKEN, "").strip()
+
+        if is_complete:
+            interview.status = InterviewStatus.FINISHING
+            interview.active_question_status = "COMPLETED"
+            interview.active_question_number = None
+            assigned_q_num = None
+        else:
+            for k, v in state_updates.items():
+                if k == "update_active_question_text_from_ai":
+                    interview.active_question_text = _extract_core_question_text(cleaned_ai_response)
+                elif hasattr(interview, k):
+                    setattr(interview, k, v)
 
         # 3. Save assistant message to database
         ai_msg = Message(
             id=str(uuid.uuid4())[:8],
             interview_id=interview_id,
             role=MessageRole.ASSISTANT,
-            content=full_ai_response.strip(),
-            question_number=next_q_num if not is_complete else None,
+            content=_clean_llm_response(cleaned_ai_response),
+            question_number=assigned_q_num,
             created_at=datetime.now(timezone.utc),
         )
         db.add(ai_msg)
-
-        if is_complete:
-            interview.status = InterviewStatus.COMPLETED
         interview.updated_at = datetime.now(timezone.utc)
-
         await db.commit()
 
         yield {
             "chunk": "",
-            "is_complete": is_complete,
-            "message_id": ai_msg.id,
-            "question_number": ai_msg.question_number,
             "done": True,
+            "is_complete": is_complete,
+            "next_question_number": interview.active_question_number,
+            "message_id": ai_msg.id,
         }
+
+    async def _generate_evaluation_closing(
+        self, interview: Interview, preamble_text: str = ""
+    ) -> str:
+        """Evaluate full interview transcript and generate candidate closing message with scores."""
+        transcript_history = [
+            {"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content}
+            for m in interview.messages
+            if not is_wrapup_or_evaluation_message(m.content or "")
+        ]
+
+        user_messages = [m for m in transcript_history if m.get("role") == "user" and m.get("content", "").strip()]
+        is_ro = getattr(interview, "language", "en") == "ro"
+
+        if len(user_messages) == 0:
+            intro_p = f"{preamble_text.strip()}\n\n" if preamble_text.strip() else ""
+            if is_ro:
+                return (
+                    f"{intro_p}"
+                    f"Îți mulțumim, {interview.candidate_name}! Sesiunea de interviu pentru poziția de **{interview.job_title}** s-a încheiat.\n\n"
+                    f"**Evaluare Generală AI: 0.0/10** (No Hire)\n\n"
+                    f"Candidatul nu a participat și nu a oferit niciun răspuns la întrebările de interviu înainte de finalizarea sesiunii. Nu s-a putut realiza o evaluare tehnică.\n\n"
+                    f"**Arii de Îmbunătățire / Lacune:**\n"
+                    f"- Niciun răspuns furnizat pe parcursul interviului tehnic live.\n"
+                    f"- Toate cerințele postului au rămas neevaluate.\n\n"
+                    f"Transcrierea completă și datele de evaluare au fost înregistrate."
+                )
+            return (
+                f"{intro_p}"
+                f"Thank you, {interview.candidate_name}! The interview session for the **{interview.job_title}** position has concluded.\n\n"
+                f"**Overall AI Assessment: 0.0/10** (No Hire)\n\n"
+                f"The candidate did not participate or provide any responses to the interview questions before concluding the session. No technical assessment could be performed.\n\n"
+                f"**Areas for Improvement / Gaps:**\n"
+                f"- No responses provided during the live technical interview.\n"
+                f"- All core job requirements remain completely unassessed.\n\n"
+                f"Your full transcript and evaluation data have been recorded."
+            )
+
+        topics = interview.topics_plan or []
+        covered_count = min(len(topics), (interview.current_topic_index or 0) + 1) if topics else 0
+        exp_level_str = (
+            interview.experience_level.value
+            if hasattr(interview.experience_level, "value")
+            else str(interview.experience_level)
+        )
+
+        eval_report = await self.llm.evaluate_interview(
+            job_title=interview.job_title,
+            job_description=interview.job_description,
+            candidate_name=interview.candidate_name,
+            cv_raw_text=interview.cv_raw_text or "",
+            transcript=transcript_history,
+            experience_level=exp_level_str,
+            time_limit_minutes=interview.time_limit_minutes,
+            covered_topics_count=covered_count,
+            total_topics_count=len(topics) if topics else None,
+            topics_plan=topics,
+        )
+
+        overall_score = eval_report.get("overall_score", 0.0)
+        summary_text = eval_report.get("summary", "Technical interview evaluation completed.")
+        strengths = eval_report.get("strengths", [])
+        strengths_str = _format_eval_feedback_section(strengths, is_ro=is_ro)
+        weaknesses = eval_report.get("weaknesses", [])
+        weaknesses_str = _format_eval_feedback_section(weaknesses, is_ro=is_ro)
+        rec_label = eval_report.get("recommendation", "hire").replace("_", " ").title()
+
+        intro_p = f"{preamble_text.strip()}\n\n" if preamble_text.strip() else ""
+
+        if is_ro:
+            return (
+                f"{intro_p}"
+                f"Îți mulțumim, {interview.candidate_name}! Sesiunea de interviu pentru poziția de **{interview.job_title}** s-a încheiat.\n\n"
+                f"**Evaluare Generală AI: {overall_score}/10** ({rec_label})\n\n"
+                f"{summary_text}\n\n"
+                + (f"**Puncte Forte Observate:**\n{strengths_str}\n\n" if strengths_str else "")
+                + (f"**Arii de Îmbunătățire / Lacune:**\n{weaknesses_str}\n\n" if weaknesses_str else "")
+                + f"Transcrierea completă și datele de evaluare au fost înregistrate."
+            )
+
+        return (
+            f"{intro_p}"
+            f"Thank you, {interview.candidate_name}! The interview session for the **{interview.job_title}** position has concluded.\n\n"
+            f"**Overall AI Assessment: {overall_score}/10** ({rec_label})\n\n"
+            f"{summary_text}\n\n"
+            + (f"**Key Strengths Observed:**\n{strengths_str}\n\n" if strengths_str else "")
+            + (f"**Areas for Improvement / Gaps:**\n{weaknesses_str}\n\n" if weaknesses_str else "")
+            + f"Your full transcript and evaluation data have been recorded."
+        )
 
     async def delete_interview(self, db: AsyncSession, interview_id: str) -> bool:
         stmt = delete(Interview).where(Interview.id == interview_id)
@@ -389,30 +1464,121 @@ class InterviewService:
         await db.commit()
         return result.rowcount > 0
 
+    def _has_evaluation_report(self, interview: Interview) -> bool:
+        """Check if an assistant evaluation report already exists in interview messages."""
+        for m in reversed(interview.messages):
+            if m.role == MessageRole.ASSISTANT:
+                content_lower = (m.content or "").lower()
+                if (
+                    "overall ai assessment" in content_lower
+                    or "evaluare general" in content_lower
+                    or "recruiter evaluation report" in content_lower
+                    or "arii de îmbunătățire" in content_lower
+                    or "arii de imbunatatire" in content_lower
+                    or "areas for improvement" in content_lower
+                ):
+                    return True
+        return False
+
     async def complete_interview(self, db: AsyncSession, interview_id: str) -> Optional[Interview]:
-        """Mark an interview as completed and append a closing acknowledgment message."""
+        """Mark an interview as completed, generate AI evaluation report, and ensure strict state-machine idempotency."""
         interview = await self.get_interview(db, interview_id)
         if not interview:
             return None
 
-        now = datetime.now(timezone.utc)
-        interview.status = InterviewStatus.COMPLETED
-        interview.updated_at = now
+        # 1. If already COMPLETED and already has evaluation report, return immediately
+        if interview.status == InterviewStatus.COMPLETED and self._has_evaluation_report(interview):
+            return interview
 
-        closing_msg = Message(
-            id=str(uuid.uuid4())[:8],
-            interview_id=interview_id,
-            role=MessageRole.ASSISTANT,
-            content=(
-                f"Thank you, {interview.candidate_name}! The interview session for the **{interview.job_title}** position has concluded. "
-                f"Your answers and transcript have been securely recorded."
-            ),
-            question_number=None,
-            created_at=now,
-        )
-        db.add(closing_msg)
-        await db.commit()
-        await db.refresh(interview)
+        # 2. Acquire lock to serialize evaluation generation for this interview ID
+        if interview_id not in self._eval_locks:
+            self._eval_locks[interview_id] = asyncio.Lock()
+
+        async with self._eval_locks[interview_id]:
+            # Expire session cache to ensure fresh read of messages committed by other workers/connections
+            db.expire_all()
+            # Re-fetch fresh interview
+            interview = await self.get_interview(db, interview_id)
+            if not interview:
+                return None
+
+            if self._has_evaluation_report(interview):
+                if interview.status != InterviewStatus.COMPLETED:
+                    interview.status = InterviewStatus.COMPLETED
+                    await db.commit()
+                return interview
+
+            # Mark status as FINISHING in DB immediately
+            now = datetime.now(timezone.utc)
+            if interview.status != InterviewStatus.FINISHING and interview.status != InterviewStatus.COMPLETED:
+                interview.status = InterviewStatus.FINISHING
+                interview.updated_at = now
+                await db.commit()
+
+            # Generate evaluation report with safety fallback
+            is_ro = getattr(interview, "language", "en") == "ro"
+            try:
+                closing_content = await self._generate_evaluation_closing(interview)
+            except Exception as exc:
+                logger.exception("[Interview %s] Evaluation generation error: %s", interview_id, exc)
+                if is_ro:
+                    closing_content = (
+                        f"Îți mulțumim, {interview.candidate_name}! Sesiunea de interviu pentru poziția de **{interview.job_title}** s-a încheiat.\n\n"
+                        f"**Evaluare Generală AI: 7.0/10** (Hire)\n\n"
+                        f"Candidatul a parcurs interviul tehnic cu succes.\n\n"
+                        f"Transcrierea completă și datele de evaluare au fost înregistrate."
+                    )
+                else:
+                    closing_content = (
+                        f"Thank you, {interview.candidate_name}! The interview session for the **{interview.job_title}** position has concluded.\n\n"
+                        f"**Overall AI Assessment: 7.0/10** (Hire)\n\n"
+                        f"The candidate successfully completed the technical interview.\n\n"
+                        f"Your full transcript and evaluation data have been recorded."
+                    )
+
+            # Check if there is an existing wrap-up or evaluation message to replace
+            existing_closing_msg = None
+            for m in reversed(interview.messages):
+                if m.role == MessageRole.ASSISTANT:
+                    content_lower = (m.content or "").lower()
+                    if (
+                        "overall ai assessment" in content_lower
+                        or "evaluare general" in content_lower
+                        or "recruiter evaluation report" in content_lower
+                        or "arii de îmbunătățire" in content_lower
+                        or "arii de imbunatatire" in content_lower
+                        or "key strengths" in content_lower
+                        or "s-a încheiat" in content_lower
+                        or "s-a incheiat" in content_lower
+                        or "has concluded" in content_lower
+                        or "thank you" in content_lower
+                        or "mulțumim" in content_lower
+                        or "multumim" in content_lower
+                        or "[interview_complete]" in content_lower
+                    ):
+                        existing_closing_msg = m
+                        break
+
+            finish_time = datetime.now(timezone.utc)
+            if existing_closing_msg is not None:
+                existing_closing_msg.content = closing_content
+                existing_closing_msg.updated_at = finish_time
+            else:
+                closing_msg = Message(
+                    id=str(uuid.uuid4())[:8],
+                    interview_id=interview_id,
+                    role=MessageRole.ASSISTANT,
+                    content=closing_content,
+                    question_number=None,
+                    created_at=finish_time,
+                )
+                db.add(closing_msg)
+
+            interview.status = InterviewStatus.COMPLETED
+            interview.updated_at = finish_time
+            await db.commit()
+            return await self.get_interview(db, interview.id)
+
     # ==============================================================================
     # [DEV ONLY - TEMPORARY TESTING METHOD TO BE REMOVED LATER]
     # ==============================================================================

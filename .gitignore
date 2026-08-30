@@ -53,7 +53,9 @@ venv.bak/
 !.env.example
 
 # Local Storage / Uploads / Model weights & Databases
+storage/
 uploads/
+.paddleocr/
 *.db
 *.sqlite
 *.sqlite3

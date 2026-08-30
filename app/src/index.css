@@ -48,9 +48,9 @@
     --popover: 224 14% 14%;
     --popover-foreground: 210 20% 98%;
 
-    /* In Dark Mode: Soft matte slate primary (no glaring blinding white) */
-    --primary: 224 14% 22%;
-    --primary-foreground: 210 20% 98%;
+    /* In Dark Mode: Crisp high-contrast primary (standard shadcn/ui) */
+    --primary: 210 20% 98%;
+    --primary-foreground: 224 14% 10%;
 
     --secondary: 224 14% 18%;
     --secondary-foreground: 210 20% 98%;

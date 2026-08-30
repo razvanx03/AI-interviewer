@@ -28,9 +28,20 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     DEFAULT_LLM_MODEL: str
     DEFAULT_EMBEDDING_MODEL: str
+    LLM_PROVIDER: str = "ollama"
+    OLLAMA_NUM_CTX: int = 8192
+    SAFETY_MAX_QUESTIONS: int = 30
 
     # Database connection string (Required from .env - fails fast if missing)
     DATABASE_URL: str
+
+    # Document & CV Storage
+    STORAGE_DIR: str = "storage/cvs"
+
+    # Authentication & JWT
+    JWT_SECRET_KEY: str = "ai_interviewer_super_secret_jwt_key_2026_change_in_prod"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),

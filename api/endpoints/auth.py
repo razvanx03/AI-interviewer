@@ -1,0 +1,76 @@
+﻿from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, or_
+
+from db.session import get_db
+from models.user import User
+from schemas.auth import LoginRequest, TokenResponse, UserResponse
+from core.security import verify_password, create_access_token
+from core.config import settings
+from core.deps import get_current_user
+
+router = APIRouter()
+
+@router.post("/login", response_model=TokenResponse)
+async def login(
+    req: LoginRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    """Authenticate admin user, issue JWT, and attach HttpOnly cookie."""
+    identifier = req.username_or_email.strip().lower()
+
+    # Search by exact email or prefix username matching
+    stmt = select(User).where(
+        or_(
+            User.email.ilike(identifier),
+            User.email.ilike(f"{identifier}@%"),
+        )
+    )
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user or not verify_password(req.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials. Please check your username/email and password.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive. Please contact support.",
+        )
+
+    token = create_access_token(
+        data={"sub": user.id, "email": user.email, "role": user.role}
+    )
+
+    # Set secure HttpOnly cookie for browser sessions
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+        secure=False,
+    )
+
+    return TokenResponse(
+        access_token=token,
+        token_type="bearer",
+        user=UserResponse.model_validate(user),
+    )
+
+@router.post("/logout")
+async def logout(response: Response):
+    """Clear HttpOnly access_token cookie."""
+    response.delete_cookie(key="access_token", path="/")
+    return {"message": "Logged out successfully"}
+
+@router.get("/me", response_model=UserResponse)
+async def get_me(current_user: User = Depends(get_current_user)):
+    """Fetch profile of currently authenticated user."""
+    return UserResponse.model_validate(current_user)
