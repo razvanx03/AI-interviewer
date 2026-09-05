@@ -1,25 +1,18 @@
 # CV Schemas (`api/schemas/cv.py`)
 
-Defines data validation schemas for document upload, structured parsing results, and database responses.
+Defines data validation schemas for in-memory batch extraction of candidate CV documents.
 
 ---
 
-## 1. `CVParseResult`
-- `id`: Unique CV identifier (UUID prefix).
+## 1. `ExtractedCandidateItem`
 - `filename`: Uploaded file name.
 - `file_type`: Document type (`pdf` or `docx`).
-- `file_size_bytes`: Integer size in bytes.
-- `storage_path`: Relative filesystem path.
-- `extracted_text`: Raw plain text extracted from document.
-- `parsed_data`: Structured JSON candidate metadata.
-- `parsing_status`: Parsing status (`pending`, `completed`, `failed`).
-- `created_at`: Datetime timestamp.
+- `raw_text`: Sanitized plain text extracted from the document in-memory.
+- `extracted_name`: Candidate full name inferred from document header or filename (optional).
+- `file_size`: Integer size of the document in bytes.
 
 ---
 
-## 2. `CVResponse`
-Full API response schema representing a persisted CV record in PostgreSQL:
-- `id`, `user_id`, `interview_id`
-- `file_name`, `file_type`, `file_size`, `storage_path`
-- `raw_text`, `parsed_data`, `parsing_status`
-- `created_at`, `updated_at`
+## 2. `BatchExtractResponse`
+Response schema returned by `POST /api/v1/cv/extract-batch`:
+- `candidates`: List of `ExtractedCandidateItem` objects ready for UI display and RAG screening.

@@ -17,16 +17,20 @@ class DocumentExtractor:
     """
 
     SPARSE_TEXT_THRESHOLD: int = 50  # Character count below which OCR fallback is triggered
+    MAX_FILE_SIZE_BYTES: int = 10 * 1024 * 1024  # 10 MB maximum upload limit per file
 
     @staticmethod
     def validate_file(filename: str, file_bytes: bytes) -> str:
         """
-        Validate file extension and binary magic bytes.
+        Validate file extension, file size, and binary magic bytes.
         Returns validated format: 'pdf' or 'docx'.
-        Raises ValueError with clear message on invalid, empty, or corrupted files.
+        Raises ValueError with clear message on invalid, empty, or oversized files.
         """
         if not file_bytes or len(file_bytes) == 0:
             raise ValueError("Uploaded file is empty (0 bytes).")
+
+        if len(file_bytes) > DocumentExtractor.MAX_FILE_SIZE_BYTES:
+            raise ValueError(f"Uploaded file '{filename}' exceeds maximum allowed size of 10MB.")
 
         fname_lower = filename.lower()
         if not (fname_lower.endswith(".pdf") or fname_lower.endswith(".docx")):
@@ -166,9 +170,30 @@ class DocumentExtractor:
         else:
             raise ValueError(f"Unsupported file type: {file_type}")
 
+        # Sanitize text: remove null bytes (\x00) and orphaned control chars that break PostgreSQL text encoding
+        from core.constants import sanitize_postgres_text
+        raw_text = sanitize_postgres_text(raw_text)
+
         if not raw_text or len(raw_text.strip()) < 10:
             raise ValueError("No readable text could be extracted from document. The file may be empty or contain unsupported image formats.")
 
         return raw_text, file_type
 
+    def extract_as_document(self, filename: str, file_bytes: bytes):
+        """
+        Extracts document text and wraps it in a standardized LangChain Document object
+        with complete metadata (source, file_type, char_count).
+        """
+        from langchain_core.documents import Document
+        raw_text, file_type = self.extract_text(filename, file_bytes)
+        return Document(
+            page_content=raw_text,
+            metadata={
+                "source": filename,
+                "file_type": file_type,
+                "char_count": len(raw_text),
+            },
+        )
+
 document_extractor = DocumentExtractor()
+

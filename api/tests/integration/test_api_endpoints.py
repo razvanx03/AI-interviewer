@@ -132,3 +132,11 @@ class TestAPIEndpointsIntegration:
         # 8. Delete Interview
         del_res = await async_client.delete(f"/api/v1/interviews/{interview_id}", headers=auth_headers)
         assert del_res.status_code == 204
+
+    async def test_security_headers_present(self, async_client: AsyncClient):
+        res = await async_client.get("/health")
+        assert res.status_code == 200
+        assert res.headers.get("x-frame-options") == "DENY"
+        assert res.headers.get("x-content-type-options") == "nosniff"
+        assert res.headers.get("referrer-policy") == "strict-origin-when-cross-origin"
+        assert res.headers.get("x-xss-protection") == "1; mode=block"

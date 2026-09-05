@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     # CORS Settings
-    CORS_ORIGINS: List[str] = [
+    CORS_ORIGINS: Union[List[str], str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://0.0.0.0:5173",
@@ -17,10 +17,16 @@ class Settings(BaseSettings):
     ]
     CORS_ORIGIN_REGEX: Optional[str] = None
 
-    @field_validator("CORS_ORIGINS", mode="before")
+    @field_validator("CORS_ORIGINS")
     @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
-        if isinstance(v, str) and not v.startswith("["):
+        if isinstance(v, str):
+            if v.startswith("[") and v.endswith("]"):
+                import json
+                try:
+                    return json.loads(v)
+                except Exception:
+                    pass
             return [i.strip() for i in v.split(",") if i.strip()]
         return v
 
@@ -35,11 +41,8 @@ class Settings(BaseSettings):
     # Database connection string (Required from .env - fails fast if missing)
     DATABASE_URL: str
 
-    # Document & CV Storage
-    STORAGE_DIR: str = "storage/cvs"
-
-    # Authentication & JWT
-    JWT_SECRET_KEY: str = "ai_interviewer_super_secret_jwt_key_2026_change_in_prod"
+    # Authentication & JWT (Required from .env - fails fast if missing)
+    JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 

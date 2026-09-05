@@ -1,5 +1,14 @@
 import React, { useRef, useState } from 'react';
-import { UploadCloud, FileText, X, AlertCircle, Users, CheckCircle2, Download } from 'lucide-react';
+import {
+  UploadCloud,
+  FileText,
+  X,
+  AlertCircle,
+  Users,
+  CheckCircle2,
+  Download,
+  Trash2,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -11,6 +20,7 @@ interface CVUploaderProps {
   onAddFiles: (files: File[]) => void;
   onRemoveCandidate: (index: number) => void;
   onUpdateCandidateName?: (index: number, name: string) => void;
+  onClearAllCandidates?: () => void;
 }
 
 export const CVUploader: React.FC<CVUploaderProps> = ({
@@ -18,6 +28,7 @@ export const CVUploader: React.FC<CVUploaderProps> = ({
   onAddFiles,
   onRemoveCandidate,
   onUpdateCandidateName,
+  onClearAllCandidates,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -49,6 +60,14 @@ export const CVUploader: React.FC<CVUploaderProps> = ({
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+  };
+
+  const handleClearAll = () => {
+    setUploadError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    onClearAllCandidates?.();
   };
 
   const processFiles = (files: File[]) => {
@@ -169,9 +188,24 @@ export const CVUploader: React.FC<CVUploaderProps> = ({
               <Users className="h-3.5 w-3.5 text-blue-500 dark:text-blue-400" />
               <span>{t.form.candidatePoolTitle}</span>
             </div>
-            <Badge variant="secondary" className="text-[10px] font-mono h-5 px-1.5 select-none">
-              {candidates.length} {t.form.candidateCount}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="text-[10px] font-mono h-5 px-1.5 select-none">
+                {candidates.length} {t.form.candidateCount}
+              </Badge>
+              {onClearAllCandidates && candidates.length > 0 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleClearAll}
+                  className="h-6 px-2 text-[11px] font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors gap-1 cursor-pointer select-none"
+                  title="Clear all candidates"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  <span>{t.form.clearAll}</span>
+                </Button>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 max-h-[380px] sm:max-h-[440px] overflow-y-auto pr-1">

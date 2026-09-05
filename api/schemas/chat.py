@@ -17,7 +17,7 @@ class ChatMessage(BaseModel):
     question_number: Optional[int] = None
 
 class ChatRequest(BaseModel):
-    content: str = Field(..., min_length=1, description="Candidate's response/message")
+    content: str = Field(..., min_length=1, max_length=5000, description="Candidate's response/message")
 
 class ChatResponse(BaseModel):
     message: ChatMessage

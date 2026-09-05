@@ -7,7 +7,8 @@ Independent document processing engine for PDF and DOCX documents with binary ma
 ## 1. Magic Bytes & MIME Validation
 - **PDF**: Enforces `%PDF-` binary signature.
 - **DOCX**: Enforces `PK\x03\x04` ZIP container header and checks for OpenXML internal structure (`word/document.xml`).
-- Rejects non-PDF/non-DOCX files and corrupt archives with HTTP 400/422.
+- **File Size**: Enforces maximum upload limit of 10 MB per file (`MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024`). Rejects oversized files with HTTP 413.
+- Rejects non-PDF/non-DOCX files, corrupt archives, and empty files with HTTP 400/413/422.
 
 ---
 

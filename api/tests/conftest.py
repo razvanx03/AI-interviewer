@@ -120,6 +120,19 @@ class MockLLMProvider(BaseLLMProvider):
             "summary": "Candidate demonstrated strong engineering autonomy and clean design skills.",
         }
 
+    async def embed_text(self, text: str) -> List[float]:
+        # Return deterministic 768-dimensional unit vector based on text length and hash
+        import hashlib, math
+        vec = [0.0] * 768
+        for w in text.lower().split():
+            h = int(hashlib.md5(w.encode("utf-8")).hexdigest(), 16) % 768
+            vec[h] += 1.0
+        norm = math.sqrt(sum(x * x for x in vec)) or 1.0
+        return [x / norm for x in vec]
+
+    async def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return [await self.embed_text(t) for t in texts]
+
 
 from sqlalchemy.pool import NullPool
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession

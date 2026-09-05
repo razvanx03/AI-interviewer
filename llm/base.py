@@ -3,7 +3,7 @@ from typing import AsyncGenerator, List, Dict, Any, Optional
 
 class BaseLLMProvider(ABC):
     """
-    Abstract interface for AI/LLM providers (Mock, Ollama, LangChain, etc.)
+    Abstract interface for AI/LLM providers (Ollama, LangChain, etc.)
     Ensures modularity so model providers can be swapped without touching API routes.
     """
 
@@ -54,4 +54,14 @@ class BaseLLMProvider(ABC):
         topics_plan: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Produce structured evaluation report for a completed interview."""
+        pass
+
+    @abstractmethod
+    async def embed_text(self, text: str) -> List[float]:
+        """Generate vector embedding for a single text string."""
+        pass
+
+    @abstractmethod
+    async def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """Generate vector embeddings for a list of document strings."""
         pass

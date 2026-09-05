@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AdminAuthContext } from '@/context/admin-context';
 import { apiLogin, apiLogout, apiGetMe } from '@/lib/api';
 
@@ -11,10 +11,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   });
 
   const [adminEmail, setAdminEmail] = useState<string | null>(() => {
-    return (
-      localStorage.getItem(`${ADMIN_AUTH_KEY}_email`) ||
-      (isAdmin ? 'admin@ai-interviewer.com' : null)
-    );
+    return localStorage.getItem(`${ADMIN_AUTH_KEY}_email`);
   });
 
   const [isLoading, setIsLoading] = useState<boolean>(true);

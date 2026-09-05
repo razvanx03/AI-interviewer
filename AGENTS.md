@@ -74,3 +74,38 @@ Whenever you make changes to this codebase:
      - **Always update `docker-compose.yml`**, `api/Dockerfile`, `app/Dockerfile`, and `.dockerignore` files.
      - **Always verify that `docker compose up --build` continues to work cleanly** and launches all 3 services (`frontend`, `backend`, `db`).
    - Document any new containerized services, volume mounts, or networking changes in `docs/docker.md`.
+
+---
+
+## 7. Strict Prohibition of Dataset Overfitting, Hardcoding & Fake Benchmarks (ZERO TOLERANCE)
+
+1. **Never Overfit to Test Datasets or Specific Files**:
+   - AI agents are **STRICTLY FORBIDDEN** from hardcoding heuristics, cities, companies, candidate names, technologies, or artificial scoring ladders tailored to specific test files, sample datasets, or wizard mocks.
+   - Never write logic that expects a particular candidate, city (e.g., "Sibiu"), company, or stack (e.g., "Ruby on Rails", ".NET and Node.js") to achieve predetermined scores or rankings.
+2. **Generic, Bidirectional, and Symmetric Systems Only**:
+   - All matching, scoring, and classification pipelines must be completely role-agnostic and dynamically driven by the user's inputs (`job_title`, `job_description`, candidate texts).
+   - If the system is evaluated on a Data Engineering role, a Data Engineer must rank top; if evaluated on an Embedded role, an Embedded engineer must rank top; if on a Web role, a Web engineer must rank top.
+3. **Word Boundary Enforcement for Technical Matching**:
+   - Never use naive substring checks (e.g. `'rest' in text` or `'go' in text`), as they create catastrophic false positives (matching "REST" in "Somarest" or "Go" in general Romanian words).
+   - Always enforce exact word boundaries (`\b`) and handle punctuation-bearing symbols (`.NET`, `C#`, `C++`) safely.
+4. **Authentic AI & RAG Evaluation**:
+   - Prompts must remain generic and never state false role assumptions (e.g., never instruct an LLM that "You are hiring for a Web Backend Developer" when the job title could be any engineering role).
+
+---
+
+## 8. Strict Prohibition of Silent Fallbacks, Mocks in Production, and Error Masking (STRICT FAIL-FAST POLICY)
+
+1. **Zero Silent Fallbacks Across the Entire Codebase (ZERO TOLERANCE)**:
+   - If an AI model is not installed, Ollama is unreachable, pgvector/database fails, a network call times out, or document parsing fails, the code **MUST FAIL FAST AND RAISE AN EXPLICIT EXCEPTION** (`RuntimeError`, `ValueError`, `HTTPException`).
+   - AI agents are **STRICTLY FORBIDDEN** from catching exceptions and falling back to:
+     - Fake or deterministic hash-based vectors (`_fallback_embedding`, zero-vectors `[0.0] * 768`).
+     - Canned AI messages pretending the interviewer responded.
+     - Fabricated evaluation reports or default scores (e.g. fake `7.0/10 (Hire)`).
+     - Heuristic regex parsers pretending LLM structured extraction succeeded.
+2. **No Mock Providers in Production Paths**:
+   - `MockLLMProvider` or mock engines are strictly restricted to `api/tests/` for deterministic unit test fixtures.
+   - Under no circumstances may application factories (`get_llm_provider`), endpoints, or services (`InterviewService`, `ScreeningService`, `CVParser`) fall back to mock providers when a model or service fails.
+3. **Expose Real Errors Immediately**:
+   - Always let errors bubble up with actionable diagnostic messages (e.g. stating which model is missing and prompting `ollama pull <model>`).
+   - Never mask, swallow, or disguise operational errors as successful operations.
+

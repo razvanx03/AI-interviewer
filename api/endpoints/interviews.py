@@ -13,16 +13,19 @@ from schemas.interview import (
 )
 from schemas.chat import ChatMessage
 from services.interview_service import interview_service
+from services.screening_service import screening_service
 
 router = APIRouter()
 
 @router.post("/screen", response_model=CandidateScreeningResponse)
 async def screen_candidates_endpoint(
     data: CandidateScreeningRequest,
+    db: AsyncSession = Depends(get_db),
     admin: User = Depends(get_current_admin),
 ):
-    """Screen and rank candidate resumes without creating database session records yet."""
-    top_cand, results = interview_service.screen_candidates(
+    """Screen and rank candidate resumes using semantic chunking, pgvector, and RAG synthesis."""
+    top_cand, results = await screening_service.screen_candidates_rag(
+        db=db,
         job_title=data.job_title,
         job_description=data.job_description,
         experience_level=data.experience_level.value,
@@ -100,15 +103,4 @@ async def delete_interview(
         )
     return None
 
-# ==============================================================================
-# [DEV ONLY - TEMPORARY TESTING ENDPOINT TO BE REMOVED LATER]
-# ==============================================================================
-@router.delete("/admin/clear-all", status_code=status.HTTP_200_OK)
-async def clear_entire_database(
-    db: AsyncSession = Depends(get_db),
-    admin: User = Depends(get_current_admin),
-):
-    """[DEV ONLY] Temporary testing endpoint to truncate all tables in database."""
-    await interview_service.clear_all_data(db)
-    return {"message": "Database truncated successfully."}
 

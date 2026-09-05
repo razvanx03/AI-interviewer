@@ -17,25 +17,33 @@ class ExperienceLevel(str, Enum):
     EXECUTIVE = "executive"
 
 class CandidateItem(BaseModel):
+    id: Optional[str] = Field(None, description="Unique candidate ID")
     name: str = Field(..., description="Candidate full name")
     cv_filename: Optional[str] = Field(None, description="Filename of candidate CV")
     cv_raw_text: Optional[str] = Field(None, description="Raw or parsed text content of candidate CV")
 
 class CandidateScreeningResult(BaseModel):
+    id: Optional[str] = Field(None, description="Unique candidate ID")
     name: str
     match_score: int = Field(..., ge=0, le=100, description="Match score from 0 to 100")
     strengths: List[str] = Field(default_factory=list, description="Key candidate strengths relevant to job")
+    gaps: Optional[List[str]] = Field(default_factory=list, description="Identified candidate gaps relative to JD")
+    matched_chunks: Optional[List[str]] = Field(default_factory=list, description="Top semantic CV chunks retrieved via pgvector")
     summary: str = Field(..., description="Short screening summary of candidate")
     is_selected: bool = Field(False, description="True if chosen as the winning candidate")
     cv_filename: Optional[str] = None
     cv_raw_text: Optional[str] = None
+    experience_years: Optional[float] = Field(None, description="Verified total professional work experience in years")
+    timeline_summary: Optional[str] = Field(None, description="Detailed employment timeline summary")
+    tech_tenure: Optional[Dict[str, float]] = Field(default_factory=dict, description="Tenure per technology in years")
+    work_history: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Structured employment history blocks")
 
 class CandidateScreeningRequest(BaseModel):
     job_title: str = Field(..., description="Job role/title")
     company_name: Optional[str] = Field(None, description="Company name")
     job_description: str = Field(..., description="Job requirements")
     experience_level: ExperienceLevel = Field(default=ExperienceLevel.MID, description="Seniority level")
-    candidates: List[CandidateItem] = Field(..., min_length=1, description="List of candidate resumes")
+    candidates: List[CandidateItem] = Field(..., min_length=1, max_length=150, description="List of candidate resumes")
 
 class CandidateScreeningResponse(BaseModel):
     top_candidate: Dict[str, Any]

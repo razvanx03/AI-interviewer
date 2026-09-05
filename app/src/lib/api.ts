@@ -116,6 +116,7 @@ export async function apiScreenCandidates(
     job_description: input.jobDescription,
     experience_level: input.experienceLevel,
     candidates: (input.candidates || []).map((c) => ({
+      id: c.id || null,
       name: c.name,
       cv_filename: c.cvFileName || c.file?.name || null,
       cv_raw_text: c.cvRawText || null,
@@ -491,22 +492,6 @@ export async function apiDeleteInterview(id: string): Promise<boolean> {
     return res.ok;
   } catch (error) {
     console.error('Failed to delete interview from backend:', error);
-    return false;
-  }
-}
-
-// ==============================================================================
-// [DEV ONLY - TEMPORARY TESTING FUNCTION TO BE REMOVED LATER]
-// ==============================================================================
-export async function apiClearEntireDatabase(): Promise<boolean> {
-  try {
-    const res = await fetch(`${API_BASE}/interviews/admin/clear-all`, {
-      method: 'DELETE',
-      credentials: 'include',
-    });
-    return res.ok;
-  } catch (error) {
-    console.error('Failed to clear entire database:', error);
     return false;
   }
 }
