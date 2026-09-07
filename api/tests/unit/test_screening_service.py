@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from services.screening_service import screening_service
+from services.screening_service import ScreeningService, screening_service
 from llm.chunking import SemanticTextSplitter
 from models.cv_chunk import CVChunk
 from schemas.interview import CandidateItem
@@ -360,12 +360,9 @@ class TestScreeningServiceUnit:
             {"name": "Candidate C (5.3y)", "match_score": 97, "experience_years": 5.3},
             {"name": "Candidate D (Lower)", "match_score": 92, "experience_years": 8.0},
         ]
-        items.sort(
-            key=lambda x: (x.get("match_score", 0), x.get("experience_years", 0.0)),
-            reverse=True,
-        )
-        assert items[0]["name"] == "Candidate B (7.3y)"
-        assert items[1]["name"] == "Candidate C (5.3y)"
-        assert items[2]["name"] == "Candidate A (4.7y)"
-        assert items[3]["name"] == "Candidate D (Lower)"
+        sorted_items = ScreeningService.sort_candidates(items)
+        assert sorted_items[0]["name"] == "Candidate B (7.3y)"
+        assert sorted_items[1]["name"] == "Candidate C (5.3y)"
+        assert sorted_items[2]["name"] == "Candidate A (4.7y)"
+        assert sorted_items[3]["name"] == "Candidate D (Lower)"
 

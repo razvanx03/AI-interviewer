@@ -409,10 +409,7 @@ class ScreeningService:
             )
 
         # 7. Sort candidates descending by match_score, breaking ties with verified experience_years
-        results.sort(
-            key=lambda x: (x.get("match_score", 0), x.get("experience_years", 0.0)),
-            reverse=True,
-        )
+        results = self.sort_candidates(results)
 
         # 8. Honor selected candidate if specified; otherwise select #1
         selected_cand = None
@@ -429,6 +426,15 @@ class ScreeningService:
             selected_cand = results[0]
 
         return selected_cand or {}, results
+
+    @staticmethod
+    def sort_candidates(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Sort candidates descending by match_score, breaking ties with verified experience_years."""
+        return sorted(
+            results,
+            key=lambda x: (x.get("match_score", 0), x.get("experience_years", 0.0)),
+            reverse=True,
+        )
 
     def _parse_json_safe(self, text: str) -> Optional[Dict[str, Any]]:
         if not text or not text.strip():

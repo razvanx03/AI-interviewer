@@ -71,6 +71,7 @@ The **AI-Powered Job Interviewer** is a modern, privacy-centric platform designe
   - `POST /api/v1/cv/extract-batch`: In-memory multi-document text extraction (PDF/DOCX) returning sanitized text items.
   - `POST /api/v1/interviews/screen`: Multi-candidate semantic screening via RAG and pgvector similarity search.
 - **RAG & Vector Screening Architecture**:
+  - `pgvector` (`cv_chunks`): PostgreSQL `pgvector` extension storing chunk embeddings (`VECTOR(768)`) per candidate for similarity cosine search (`<=>`).
   - `SemanticTextSplitter`: Recursive character text splitting (500 chars, 50 overlap) respecting semantic boundaries.
   - `TimelineExtractor`: Section-aware tenure calculator isolating verified employment from university/high school education, student clubs, and courses.
   - `OllamaProvider.embed_documents` / `embed_text`: Generates 768-dim vector embeddings using `nomic-embed-text`.

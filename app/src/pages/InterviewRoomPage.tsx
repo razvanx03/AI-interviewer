@@ -162,7 +162,7 @@ export const InterviewRoomPage: React.FC = () => {
     setRemainingSeconds(initialRem);
 
     if (initialRem <= 0) {
-      if (!endingSessionIdRef.current) {
+      if (endingSessionIdRef.current !== activeSession.id) {
         handleEndInterview();
       }
       return;
@@ -174,7 +174,7 @@ export const InterviewRoomPage: React.FC = () => {
 
       if (rem <= 0) {
         clearInterval(interval);
-        if (!endingSessionIdRef.current) {
+        if (endingSessionIdRef.current !== activeSession.id) {
           handleEndInterview();
         }
       }
