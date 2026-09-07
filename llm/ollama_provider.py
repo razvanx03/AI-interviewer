@@ -366,9 +366,9 @@ class OllamaProvider(BaseLLMProvider):
         results: List[List[float]] = []
         all_succeeded = True
         last_error = None
-        for txt in clean_texts:
-            try:
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                for txt in clean_texts:
                     resp = await client.post(
                         f"{self.base_url}/api/embeddings",
                         json={
@@ -382,12 +382,11 @@ class OllamaProvider(BaseLLMProvider):
                             results.append(emb)
                             continue
                     last_error = f"HTTP {resp.status_code}: {resp.text[:150]}"
-                all_succeeded = False
-                break
-            except Exception as leg_err:
-                last_error = str(leg_err)
-                all_succeeded = False
-                break
+                    all_succeeded = False
+                    break
+        except Exception as leg_err:
+            last_error = str(leg_err)
+            all_succeeded = False
 
         if all_succeeded and len(results) == len(clean_texts):
             return results

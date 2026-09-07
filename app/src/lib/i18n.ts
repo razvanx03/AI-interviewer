@@ -74,6 +74,7 @@ export const translations = {
       screenAndReview: 'Screen Candidates & Review Selection',
       submitButton: 'Screen Candidates & Review Selection',
       generatingButton: 'Screening Candidates with AI...',
+      extractingCVs: 'Extracting candidate details from CVs...',
       copyInviteLink: 'Copy Candidate Invite Link',
       inviteLinkCopied: 'Invite link copied to clipboard!',
       startInterviewNow: 'Start Technical Interview Now',
@@ -109,6 +110,8 @@ export const translations = {
       supportedTypes: 'Supports multiple PDF, DOCX, DOC, TXT (Max 10MB each)',
       invalidType: 'Please upload valid PDF, DOCX, DOC, or TXT files.',
       sizeError: 'One or more files exceed the 10MB limit.',
+      extractingName: 'Extracting candidate details...',
+      detectingName: 'Reading name from CV...',
     },
     chat: {
       aiTitle: 'AI Interviewer',
@@ -214,6 +217,7 @@ export const translations = {
       screenAndReview: 'Evaluează Candidații & Vezi Rezultatul',
       submitButton: 'Evaluează Candidații & Vezi Rezultatul',
       generatingButton: 'Se evaluează candidații cu AI...',
+      extractingCVs: 'Se extrag detaliile din CV-uri...',
       copyInviteLink: 'Copiază Link Invitație Candidat',
       inviteLinkCopied: 'Link-ul de invitație a fost copiat în clipboard!',
       startInterviewNow: 'Începe Interviul Tehnic Acum',
@@ -251,6 +255,8 @@ export const translations = {
       supportedTypes: 'Suportă fișiere multiple PDF, DOCX, DOC, TXT (Max 10MB fiecare)',
       invalidType: 'Te rugăm să încarci fișiere valide PDF, DOCX, DOC sau TXT.',
       sizeError: 'Unul sau mai multe fișiere depășesc limita de 10MB.',
+      extractingName: 'Se extrag detaliile din CV...',
+      detectingName: 'Se citește numele din CV...',
     },
     chat: {
       aiTitle: 'Intervievator AI',

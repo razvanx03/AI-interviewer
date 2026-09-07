@@ -22,6 +22,7 @@ import {
   GripVertical,
   Timer,
   Globe,
+  Loader2,
 } from 'lucide-react';
 import { ThinkingOrb } from 'thinking-orbs';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -69,6 +70,11 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
   const [jobDescription, setJobDescription] = useState('');
   const [experienceLevel, setExperienceLevel] = useState<ExperienceLevel>('senior');
   const [candidates, setCandidates] = useState<CandidateItem[]>([]);
+  const [isExtractingBatch, setIsExtractingBatch] = useState<boolean>(false);
+  const isExtracting = useMemo(
+    () => isExtractingBatch || candidates.some((c) => Boolean(c.isExtracting)),
+    [isExtractingBatch, candidates]
+  );
 
   // Screening & Session state
   const [screeningResults, setScreeningResults] = useState<CandidateScreeningResult[]>([]);
@@ -129,7 +135,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
   const [isCopied, setIsCopied] = useState(false);
   const [showVectorEvidence, setShowVectorEvidence] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
 
   // Helper to change step and update URL route
   const goToStep = (step: 1 | 2 | 3) => {
@@ -190,10 +196,13 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
         file,
         fileSizeFormatted: sizeFormatted,
         cvRawText: '',
+        isExtracting: true,
       };
     });
 
+    const newIds = new Set(newItems.map((item) => item.id));
     setCandidates((prev) => [...prev, ...newItems]);
+    setIsExtractingBatch(true);
 
     // Asynchronously extract real document text and actual candidate names from files
     try {
@@ -201,26 +210,37 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
       if (res?.candidates && res.candidates.length > 0) {
         setCandidates((prev) =>
           prev.map((c) => {
+            if (!newIds.has(c.id)) return c;
             const extracted = res.candidates.find(
               (item) => item.filename.toLowerCase() === (c.cvFileName || '').toLowerCase()
             );
             if (extracted) {
               const realName =
-                (c.name === 'Candidate' || !c.name.trim()) && extracted.extracted_name
+                extracted.extracted_name && extracted.extracted_name.trim()
                   ? extracted.extracted_name
                   : c.name;
               return {
                 ...c,
                 name: realName,
                 cvRawText: extracted.raw_text,
+                isExtracting: false,
               };
             }
-            return c;
+            return { ...c, isExtracting: false };
           })
+        );
+      } else {
+        setCandidates((prev) =>
+          prev.map((c) => (newIds.has(c.id) ? { ...c, isExtracting: false } : c))
         );
       }
     } catch (err) {
       console.warn('Real-time document text extraction warning:', err);
+      setCandidates((prev) =>
+        prev.map((c) => (newIds.has(c.id) ? { ...c, isExtracting: false } : c))
+      );
+    } finally {
+      setIsExtractingBatch(false);
     }
   };
 
@@ -263,6 +283,9 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
     e.preventDefault();
     if (candidates.length === 0) {
       setFormError(t.form.noCandidatesError);
+      return;
+    }
+    if (isExtracting) {
       return;
     }
     setFormError(null);
@@ -429,7 +452,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
     const topName = activeTopCandidate.name.trim().toLowerCase();
     const topFile = (activeTopCandidate.cv_filename || '').trim().toLowerCase();
 
-    // 1. Try matching by unique candidate id
+    // 1. Try matching by unique candidate id (exact)
     if (activeTopCandidate.id) {
       const matchById = candidates.find((c) => c.id && c.id === activeTopCandidate.id);
       if (matchById?.file) return matchById.file;
@@ -450,21 +473,8 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
       if (matchByName?.file) return matchByName.file;
     }
 
-    // 4. Try matching by candidate name substring / inclusion
-    if (topName) {
-      const matchBySubName = candidates.find((c) => {
-        const cName = c.name.trim().toLowerCase();
-        return Boolean(cName && (cName.includes(topName) || topName.includes(cName)));
-      });
-      if (matchBySubName?.file) return matchBySubName.file;
-    }
-
-    // 5. Fallback: if there is only 1 candidate with a file, use that
-    const candidatesWithFiles = candidates.filter((c) => Boolean(c.file));
-    if (candidatesWithFiles.length === 1 && candidatesWithFiles[0].file) {
-      return candidatesWithFiles[0].file;
-    }
-
+    // Strictly return null if no file belongs to this specific candidate
+    // NEVER fall back to another candidate's file!
     return null;
   }, [activeTopCandidate, candidates]);
 
@@ -756,12 +766,6 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                     <CardTitle className="text-sm sm:text-base font-bold truncate">
                       {t.form.step2Title}
                     </CardTitle>
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] bg-primary/10 text-primary border-primary/30 font-medium px-1.5 py-0 select-none"
-                    >
-                      pgvector RAG
-                    </Badge>
                   </div>
                   <CardDescription className="text-[11px] text-muted-foreground mt-0.5">
                     {t.form.step2Subtitle}
@@ -814,6 +818,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                 <div className="flex-1 flex flex-col min-h-0">
                   <CVUploader
                     candidates={candidates}
+                    isExtracting={isExtracting}
                     onAddFiles={handleAddFiles}
                     onRemoveCandidate={handleRemoveCandidate}
                     onUpdateCandidateName={handleUpdateCandidateName}
@@ -837,7 +842,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
 
                 <Button
                   type="submit"
-                  disabled={isScreening || candidates.length === 0}
+                  disabled={isScreening || isExtracting || candidates.length === 0}
                   size="lg"
                   className="w-full sm:flex-1 gap-2 text-sm sm:text-base font-semibold h-11 sm:h-12 cursor-pointer shadow-sm"
                 >
@@ -845,6 +850,11 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                     <div className="flex items-center gap-2">
                       <ThinkingOrb state="working" size={20} />
                       <span>{t.form.generatingButton}</span>
+                    </div>
+                  ) : isExtracting ? (
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>{t.form.extractingCVs}</span>
                     </div>
                   ) : (
                     <>
@@ -1179,6 +1189,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                             <SelectValue placeholder="Select duration" />
                           </SelectTrigger>
                           <SelectContent>
+                            <SelectItem value="5">5 minutes</SelectItem>
                             <SelectItem value="10">10 minutes</SelectItem>
                             <SelectItem value="15">15 minutes</SelectItem>
                             <SelectItem value="20">20 minutes</SelectItem>
@@ -1410,7 +1421,9 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                         ? activeDocViewTab === 'pdf'
                           ? 'Live Interactive PDF'
                           : 'AI Extracted Profile & Ingestion'
-                        : 'Parsed Resume Profile'}
+                        : language === 'ro'
+                          ? 'Profil CV (Fără fișier PDF atașat)'
+                          : 'Parsed Resume Profile (No PDF Attached)'}
                     </p>
                   </div>
                 </div>
@@ -1421,13 +1434,14 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                     <button
                       type="button"
                       onClick={() => setActiveDocViewTab('pdf')}
-                      className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer select-none text-xs ${
+                      className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer select-none text-xs flex items-center gap-1.5 ${
                         activeDocViewTab === 'pdf'
                           ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
                           : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
-                      PDF View
+                      <span>PDF View</span>
+                      {!activeCandidateFile && <span className="text-[9px] opacity-70">(N/A)</span>}
                     </button>
                     <button
                       type="button"
@@ -1476,9 +1490,9 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                           {activeTopCandidate.cv_filename || `${activeTopCandidate.name} CV`}
                         </h4>
                         <p className="text-xs text-muted-foreground leading-relaxed">
-                          Fișierul PDF original nu este disponibil în memoria sesiunii curente. Poți
-                          vizualiza datele extrase și analizate de AI prin tab-ul &ldquo;AI
-                          Extracted Text&rdquo;.
+                          {language === 'ro'
+                            ? 'Fișierul PDF original nu este atașat acestui profil de candidat. Poți vizualiza datele complete extrase și analizate de AI prin tab-ul „AI Extracted Text”.'
+                            : 'Original PDF document is not attached to this candidate profile. You can view the full extracted resume content in the "AI Extracted Text" tab.'}
                         </p>
                       </div>
                       <Button
@@ -1489,7 +1503,11 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                         className="text-xs gap-1.5 cursor-pointer shadow-2xs"
                       >
                         <FileText className="h-3.5 w-3.5" />
-                        <span>Comută pe AI Extracted Text</span>
+                        <span>
+                          {language === 'ro'
+                            ? 'Comută pe AI Extracted Text'
+                            : 'Switch to AI Extracted Text'}
+                        </span>
                       </Button>
                     </div>
                   )

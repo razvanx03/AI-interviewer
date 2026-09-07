@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Download,
   Trash2,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +18,7 @@ import { CandidateItem } from '@/types';
 
 interface CVUploaderProps {
   candidates: CandidateItem[];
+  isExtracting?: boolean;
   onAddFiles: (files: File[]) => void;
   onRemoveCandidate: (index: number) => void;
   onUpdateCandidateName?: (index: number, name: string) => void;
@@ -25,6 +27,7 @@ interface CVUploaderProps {
 
 export const CVUploader: React.FC<CVUploaderProps> = ({
   candidates,
+  isExtracting = false,
   onAddFiles,
   onRemoveCandidate,
   onUpdateCandidateName,
@@ -192,6 +195,15 @@ export const CVUploader: React.FC<CVUploaderProps> = ({
               <Badge variant="secondary" className="text-[10px] font-mono h-5 px-1.5 select-none">
                 {candidates.length} {t.form.candidateCount}
               </Badge>
+              {isExtracting && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] font-medium h-5 px-1.5 text-blue-500 dark:text-blue-400 border-blue-500/30 bg-blue-500/10 gap-1 animate-pulse select-none"
+                >
+                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                  <span>{t.cvUploader.extractingName}</span>
+                </Badge>
+              )}
               {onClearAllCandidates && candidates.length > 0 && (
                 <Button
                   type="button"
@@ -220,27 +232,51 @@ export const CVUploader: React.FC<CVUploaderProps> = ({
                   </div>
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex items-center gap-2">
-                      <Input
-                        value={cand.name}
-                        onChange={(e) => onUpdateCandidateName?.(idx, e.target.value)}
-                        placeholder="Candidate Name (e.g. Ander Razvan)"
-                        className="h-7 text-xs font-semibold px-2 py-0 bg-background/60 border-border/80 hover:border-primary/50 focus:border-primary focus:bg-background text-foreground rounded-md transition-colors max-w-[240px]"
-                        title="Click to edit candidate name"
-                      />
+                      <div className="relative flex-1 max-w-[240px]">
+                        <Input
+                          value={cand.name}
+                          onChange={(e) => onUpdateCandidateName?.(idx, e.target.value)}
+                          placeholder={
+                            cand.isExtracting
+                              ? t.cvUploader.detectingName
+                              : 'Candidate Name (e.g. Ander Razvan)'
+                          }
+                          disabled={cand.isExtracting}
+                          className={`h-7 text-xs font-semibold px-2 py-0 bg-background/60 border-border/80 hover:border-primary/50 focus:border-primary focus:bg-background text-foreground rounded-md transition-colors w-full ${
+                            cand.isExtracting ? 'opacity-70 animate-pulse' : ''
+                          }`}
+                          title={
+                            cand.isExtracting
+                              ? t.cvUploader.extractingName
+                              : 'Click to edit candidate name'
+                          }
+                        />
+                      </div>
                       {cand.cvFileName && (
                         <span className="text-[10px] text-muted-foreground truncate hidden md:inline shrink-0">
                           ({cand.cvFileName})
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-1.5 px-0.5 text-[10px] text-muted-foreground truncate">
-                      <CheckCircle2 className="h-2.5 w-2.5 text-emerald-500 shrink-0" />
-                      <span className="truncate font-mono">
-                        {cand.fileSizeFormatted ||
-                          (cand.cvRawText
-                            ? `${Math.round(cand.cvRawText.length / 100)} KB text`
-                            : 'Ready')}
-                      </span>
+                    <div className="flex items-center gap-1.5 px-0.5 text-[10px] truncate">
+                      {cand.isExtracting ? (
+                        <>
+                          <Loader2 className="h-2.5 w-2.5 text-blue-500 animate-spin shrink-0" />
+                          <span className="truncate font-mono text-blue-500">
+                            {t.cvUploader.extractingName}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="h-2.5 w-2.5 text-emerald-500 shrink-0" />
+                          <span className="truncate font-mono text-muted-foreground">
+                            {cand.fileSizeFormatted ||
+                              (cand.cvRawText
+                                ? `${Math.round(cand.cvRawText.length / 100)} KB text`
+                                : 'Ready')}
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

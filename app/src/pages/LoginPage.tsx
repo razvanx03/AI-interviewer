@@ -1,16 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import {
-  Bot,
-  Lock,
-  Mail,
-  AlertCircle,
-  ArrowRight,
-  Sparkles,
-  ShieldCheck,
-  Globe,
-  Check,
-} from 'lucide-react';
+import { Bot, Lock, Mail, AlertCircle, ArrowRight, ShieldCheck, Globe, Check } from 'lucide-react';
 import {
   Card,
   CardHeader,
@@ -56,23 +46,13 @@ export const LoginPage: React.FC = () => {
       if (success) {
         navigate(from, { replace: true });
       } else {
-        setError(
-          import.meta.env.DEV
-            ? 'Invalid username/email or password. Default is admin / admin.'
-            : 'Invalid username/email or password.'
-        );
+        setError('Invalid username/email or password.');
       }
     } catch {
       setError('Connection failed. Please ensure the backend server is running.');
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleQuickDemoFill = () => {
-    setUsernameOrEmail('admin@ai-interviewer.com');
-    setPassword('admin');
-    setError(null);
   };
 
   return (
@@ -158,7 +138,7 @@ export const LoginPage: React.FC = () => {
                   <Input
                     id="usernameOrEmail"
                     type="text"
-                    placeholder="admin or admin@ai-interviewer.com"
+                    placeholder="Enter email or username"
                     value={usernameOrEmail}
                     onChange={(e) => setUsernameOrEmail(e.target.value)}
                     className="pl-9 h-9 text-xs"
@@ -185,30 +165,6 @@ export const LoginPage: React.FC = () => {
                   />
                 </div>
               </div>
-
-              {/* Demo Fill Helper (Development only) */}
-              {import.meta.env.DEV && (
-                <div className="rounded-lg bg-muted/40 border border-border/50 p-2.5 flex items-center justify-between text-xs">
-                  <div className="space-y-0.5">
-                    <span className="font-semibold text-foreground text-[11px] block">
-                      Demo Credentials:
-                    </span>
-                    <span className="font-mono text-[11px] text-muted-foreground">
-                      admin / admin
-                    </span>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleQuickDemoFill}
-                    className="h-7 text-[11px] px-2.5 gap-1 border-border/70 hover:bg-primary/10 hover:text-primary cursor-pointer"
-                  >
-                    <Sparkles className="h-3 w-3" />
-                    <span>Auto Fill</span>
-                  </Button>
-                </div>
-              )}
             </CardContent>
 
             <CardFooter className="flex flex-col gap-3 pt-2">

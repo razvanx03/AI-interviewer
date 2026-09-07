@@ -109,3 +109,16 @@ Whenever you make changes to this codebase:
    - Always let errors bubble up with actionable diagnostic messages (e.g. stating which model is missing and prompting `ollama pull <model>`).
    - Never mask, swallow, or disguise operational errors as successful operations.
 
+---
+
+## 9. Git & Remote Repository Workflow (STRICT PROHIBITION OF AUTONOMOUS PUSH)
+
+1. **Strict Prohibition of Autonomous `git push` (ZERO TOLERANCE)**:
+   - AI agents are **STRICTLY FORBIDDEN** from running `git push` commands autonomously to remote repositories (GitHub/origin).
+   - All commits made by the agent must remain local. The user retains absolute authority and control over reviewing changes and publishing them to remote repositories.
+   - Once changes are committed and verified locally, provide the user with the exact branch name and manual `git push` command to run in their own interactive shell.
+2. **Work Exclusively on the User's Active Branch**:
+   - AI agents must **ALWAYS work strictly on the active git branch that the user is currently on** when work begins.
+   - Never switch branches, create speculative side-branches, or modify git branch pointers without the user's explicit request.
+
+

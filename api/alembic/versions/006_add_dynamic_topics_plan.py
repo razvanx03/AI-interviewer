@@ -3,7 +3,7 @@
 Revision ID: 006_add_dynamic_topics_plan
 Revises: 005_add_cvs_table
 Create Date: 2026-08-23 22:10:00.000000
-"""
+"""
 from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa

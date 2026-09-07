@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Tuple, Optional
 import re
 from datetime import datetime
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 MONTH_MAP: Dict[str, int] = {
     # English
@@ -113,17 +114,21 @@ class TimelineExtractor:
 
     @classmethod
     def calculate_months(cls, interval_str: str) -> int:
-        parts = re.split(r"\s*(?:–|—|-|to|until|până\s+în|pana\s+in)\s*", interval_str, flags=re.IGNORECASE)
+        parts = re.split(
+            r"\s*(?:[–—\-]|(?:\b(?:to|until|până\s+în|pana\s+in)\b))\s*",
+            interval_str,
+            flags=re.IGNORECASE,
+        )
         if len(parts) != 2:
-            return 6
+            return 0
         st = cls.parse_date_point(parts[0], is_end=False)
         en = cls.parse_date_point(parts[1], is_end=True)
         if not st or not en:
-            return 6
+            return 0
         y1, m1 = st
         y2, m2 = en
         months = (y2 - y1) * 12 + (m2 - m1) + 1
-        return max(1, months)
+        return max(0, months)
 
     @classmethod
     def format_duration(cls, months: int) -> str:
@@ -353,7 +358,6 @@ class TimelineExtractor:
                 tech_tenure[t_lower] = round(tech_tenure.get(t_lower, 0.0) + years, 2)
         return tech_tenure
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 class SemanticTextSplitter:
     """

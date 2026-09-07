@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
+    # Initial Admin Credentials (Required from .env - fails fast if missing)
+    ADMIN_EMAIL: str
+    ADMIN_PASSWORD: str
+
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),
         case_sensitive=True,

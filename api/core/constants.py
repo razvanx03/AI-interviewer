@@ -5,10 +5,13 @@ from typing import List, Optional
 import re
 import unicodedata
 
-# Predefined Technology Knowledge Base for Resume Keyword Matching
+# Predefined Technology Knowledge Base for Multi-Domain Keyword & Tenure Matching
 TECH_CATALOGUE: List[str] = [
+    # Web & General Software Engineering
     ".NET",
     "C#",
+    "C++",
+    "C",
     "React",
     "TypeScript",
     "JavaScript",
@@ -43,6 +46,49 @@ TECH_CATALOGUE: List[str] = [
     "Ruby",
     "Rails",
     "Ruby on Rails",
+    "PHP",
+    "Scala",
+    # Data Engineering & Analytics
+    "Kafka",
+    "PySpark",
+    "Spark",
+    "Databricks",
+    "Delta Lake",
+    "Airflow",
+    "Hadoop",
+    "Snowflake",
+    "dbt",
+    "Pandas",
+    # Embedded, Automotive & Industrial Automation
+    "AUTOSAR",
+    "CANoe",
+    "Microcontroller",
+    "RTOS",
+    "Embedded C",
+    "Firmware",
+    "PLC",
+    "SCADA",
+    "TIA Portal",
+    # QA & Test Automation
+    "Selenium",
+    "Cypress",
+    "Playwright",
+    "PyTest",
+    "Jest",
+    # DevOps, Cloud & Monitoring
+    "Terraform",
+    "Ansible",
+    "Linux",
+    "Prometheus",
+    "Grafana",
+    # Mobile Engineering
+    "Swift",
+    "SwiftUI",
+    "Kotlin",
+    "Flutter",
+    "React Native",
+    "Android",
+    "iOS",
 ]
 
 # Interview Pacing & Adaptive State Machine Limits

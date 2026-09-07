@@ -73,7 +73,7 @@ class InterviewCreate(BaseModel):
     candidate_name: Optional[str] = Field("Candidate", description="Candidate's name")
     cv_filename: Optional[str] = Field(None, description="Uploaded CV filename")
     cv_raw_text: Optional[str] = Field(None, description="Extracted text from CV")
-    time_limit_minutes: Optional[int] = Field(None, ge=10, le=120, description="Optional interview time limit in minutes")
+    time_limit_minutes: Optional[int] = Field(None, ge=5, le=120, description="Optional interview time limit in minutes")
     language: Optional[str] = Field("en", description="Interview spoken language (en or ro)")
 
 class InterviewResponse(BaseModel):

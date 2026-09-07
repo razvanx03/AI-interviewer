@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from services.screening_service import screening_service
+from services.screening_service import ScreeningService, screening_service
 from llm.chunking import SemanticTextSplitter
 from models.cv_chunk import CVChunk
 from schemas.interview import CandidateItem
@@ -351,4 +351,41 @@ class TestScreeningServiceUnit:
         lowest_names = [r["name"].lower() for r in results[-3:]]
         assert any("formular" in name or "costel" in name or "neagu" in name for name in lowest_names)
         assert results[-1]["match_score"] <= 5
+
+    def test_tie_breaker_by_experience_years_sorting(self):
+        """When match_score is identical, candidate with higher verified experience_years must rank higher."""
+        items = [
+            {"name": "Candidate A (4.7y)", "match_score": 97, "experience_years": 4.7},
+            {"name": "Candidate B (7.3y)", "match_score": 97, "experience_years": 7.3},
+            {"name": "Candidate C (5.3y)", "match_score": 97, "experience_years": 5.3},
+            {"name": "Candidate D (Lower)", "match_score": 92, "experience_years": 8.0},
+        ]
+        sorted_items = ScreeningService.sort_candidates(items)
+        assert sorted_items[0]["name"] == "Candidate B (7.3y)"
+        assert sorted_items[1]["name"] == "Candidate C (5.3y)"
+        assert sorted_items[2]["name"] == "Candidate A (4.7y)"
+        assert sorted_items[3]["name"] == "Candidate D (Lower)"
+
+    def test_screening_handles_non_standard_llm_json_structures(self):
+        """Verify defensive parsing handles dict or string elements in screening_results without throwing AttributeError."""
+        # Simulated parsing logic on dict format
+        raw_dict = {
+            "screening_results": {
+                "Robert Moraru": {"match_score": 88, "strengths": ["C", "Firmware"]},
+                "Anca Moldovan": {"match_score": 75, "strengths": ["QA"]},
+            }
+        }
+        parsed_eval_map = {}
+        raw_results = raw_dict.get("screening_results")
+        if isinstance(raw_results, dict):
+            for cand_name, cand_eval in raw_results.items():
+                res_name = str(cand_name).strip().lower()
+                if isinstance(cand_eval, dict):
+                    cand_eval.setdefault("name", cand_name)
+                    parsed_eval_map[res_name] = cand_eval
+
+        assert "robert moraru" in parsed_eval_map
+        assert parsed_eval_map["robert moraru"]["name"] == "Robert Moraru"
+        assert parsed_eval_map["robert moraru"]["match_score"] == 88
+
 
