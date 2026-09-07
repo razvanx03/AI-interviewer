@@ -216,11 +216,11 @@ class TestInterviewService:
             ),
             candidate_name="Test Candidate",
             experience_level=ExperienceLevel.MID,
-            time_limit_minutes=None,  # Untimed (defaults to 9 topics)
+            time_limit_minutes=None,  # Untimed (defaults to 7 topics)
         )
         interview = await interview_service.create_interview(db_session, req)
         try:
-            assert len(interview.topics_plan) == 9
+            assert len(interview.topics_plan) == 7
 
             # Answer Question 1
             await interview_service.add_candidate_message_and_respond(
@@ -236,7 +236,7 @@ class TestInterviewService:
                 "I use PostgreSQL with composite indexes and explain analyze to profile queries.",
             )
 
-            # Now early finish before answering Question 3 or the rest of the 9 topics
+            # Now early finish before answering Question 3 or the rest of the 7 topics
             completed = await interview_service.complete_interview(
                 db=db_session, interview_id=interview.id
             )
@@ -245,7 +245,7 @@ class TestInterviewService:
             messages = await interview_service.get_messages(db_session, interview.id)
             report_msg = messages[-1].content
 
-            # Evaluated score should reflect coverage penalty (2/9 coverage ~ 22%)
+            # Evaluated score should reflect coverage penalty (2/7 coverage ~ 28%)
             # Even if raw score from MockLLM was 8.8, 8.8 * (2/9) ~ 2.0 / 10
             assert "Evaluare Generală AI:" in report_msg or "Overall AI Assessment:" in report_msg
             assert "No Hire" in report_msg
@@ -289,8 +289,8 @@ class TestInterviewService:
         )
         interview = await interview_service.create_interview(db_session, req)
         try:
-            # Answer 4 out of 10 topics (40% coverage < 50%)
-            for i in range(1, 5):
+            # Answer 3 out of 7 topics (42.8% coverage < 50%)
+            for i in range(1, 4):
                 await interview_service.add_candidate_message_and_respond(
                     db_session,
                     interview.id,

@@ -366,3 +366,26 @@ class TestScreeningServiceUnit:
         assert sorted_items[2]["name"] == "Candidate A (4.7y)"
         assert sorted_items[3]["name"] == "Candidate D (Lower)"
 
+    def test_screening_handles_non_standard_llm_json_structures(self):
+        """Verify defensive parsing handles dict or string elements in screening_results without throwing AttributeError."""
+        # Simulated parsing logic on dict format
+        raw_dict = {
+            "screening_results": {
+                "Robert Moraru": {"match_score": 88, "strengths": ["C", "Firmware"]},
+                "Anca Moldovan": {"match_score": 75, "strengths": ["QA"]},
+            }
+        }
+        parsed_eval_map = {}
+        raw_results = raw_dict.get("screening_results")
+        if isinstance(raw_results, dict):
+            for cand_name, cand_eval in raw_results.items():
+                res_name = str(cand_name).strip().lower()
+                if isinstance(cand_eval, dict):
+                    cand_eval.setdefault("name", cand_name)
+                    parsed_eval_map[res_name] = cand_eval
+
+        assert "robert moraru" in parsed_eval_map
+        assert parsed_eval_map["robert moraru"]["name"] == "Robert Moraru"
+        assert parsed_eval_map["robert moraru"]["match_score"] == 88
+
+

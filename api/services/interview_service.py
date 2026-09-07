@@ -634,7 +634,7 @@ class InterviewService:
         )
 
         # 1. Determine realistic target topic count based on allocated time limit (+2 to each, 5 min = 3)
-        target_topic_count = 9
+        target_topic_count = 7
         if data.time_limit_minutes:
             if data.time_limit_minutes <= 5:
                 target_topic_count = 3

@@ -250,11 +250,30 @@ class ScreeningService:
             temperature=0.2,
         )
         parsed_json = self._parse_json_safe(raw_response)
-        if parsed_json and "screening_results" in parsed_json:
-            for item in parsed_json["screening_results"]:
-                res_name = str(item.get("name", "")).strip().lower()
-                if res_name:
-                    parsed_eval_map[res_name] = item
+        if parsed_json:
+            raw_results = parsed_json.get("screening_results")
+            if raw_results is None and not any(k in parsed_json for k in ("name", "match_score", "strengths")):
+                raw_results = parsed_json
+
+            if isinstance(raw_results, dict):
+                for cand_name, cand_eval in raw_results.items():
+                    res_name = str(cand_name).strip().lower()
+                    if isinstance(cand_eval, dict):
+                        cand_eval.setdefault("name", cand_name)
+                        parsed_eval_map[res_name] = cand_eval
+                    elif isinstance(cand_eval, (int, float)):
+                        parsed_eval_map[res_name] = {"name": cand_name, "match_score": int(cand_eval)}
+            elif isinstance(raw_results, list):
+                for item in raw_results:
+                    if isinstance(item, dict):
+                        res_name = str(item.get("name", "")).strip().lower()
+                        if res_name:
+                            parsed_eval_map[res_name] = item
+                    elif isinstance(item, str) and ":" in item:
+                        c_part = item.split(":", 1)[0].strip()
+                        res_name = c_part.lower()
+                        if res_name:
+                            parsed_eval_map[res_name] = {"name": c_part, "summary": item}
 
         # 6. Build structured response items with evidence and tenure-weighted scoring
         results: List[Dict[str, Any]] = []
@@ -318,7 +337,7 @@ class ScreeningService:
                         eval_item = v
                         break
 
-            if eval_item:
+            if eval_item and isinstance(eval_item, dict):
                 raw_score = eval_item.get("match_score", det_score)
                 try:
                     score = int(float(raw_score))
