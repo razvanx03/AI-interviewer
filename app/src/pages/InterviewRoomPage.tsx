@@ -34,8 +34,9 @@ export const InterviewRoomPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [showFinishDialog, setShowFinishDialog] = useState(false);
-  const [isEnding, setIsEnding] = useState(false);
-  const isEndingRef = useRef(false);
+  const [endingSessionId, setEndingSessionId] = useState<string | null>(null);
+  const endingSessionIdRef = useRef<string | null>(null);
+  const isCurrentSessionEnding = Boolean(activeSession && endingSessionId === activeSession.id);
   const hasInitializedLangRef = useRef<string | null>(null);
   const autoEvaluatedSessionsRef = useRef<Set<string>>(new Set());
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
@@ -54,11 +55,12 @@ export const InterviewRoomPage: React.FC = () => {
       !activeSession ||
       activeSession.status === 'completed' ||
       activeSession.status === 'finishing' ||
-      isEndingRef.current
+      endingSessionIdRef.current === activeSession.id
     )
       return;
-    isEndingRef.current = true;
-    setIsEnding(true);
+    const targetSessionId = activeSession.id;
+    endingSessionIdRef.current = targetSessionId;
+    setEndingSessionId(targetSessionId);
 
     // Optimistically update status to 'finishing' so Finish button disappears immediately!
     const optimistic: InterviewSession = {
@@ -66,21 +68,23 @@ export const InterviewRoomPage: React.FC = () => {
       status: 'finishing',
       updatedAt: new Date().toISOString(),
     };
-    autoEvaluatedSessionsRef.current.add(activeSession.id);
+    autoEvaluatedSessionsRef.current.add(targetSessionId);
     setActiveSession(optimistic);
     updateInterview(optimistic);
 
     try {
-      const updated = await apiCompleteInterview(activeSession.id);
+      const updated = await apiCompleteInterview(targetSessionId);
       if (updated) {
-        setActiveSession(updated);
+        setActiveSession((prev) => (prev && prev.id === targetSessionId ? updated : prev));
         updateInterview(updated);
       }
     } catch (err) {
       console.error('Failed to complete interview:', err);
     } finally {
-      setIsEnding(false);
-      isEndingRef.current = false;
+      if (endingSessionIdRef.current === targetSessionId) {
+        endingSessionIdRef.current = null;
+        setEndingSessionId(null);
+      }
       setShowFinishDialog(false);
     }
   }, [activeSession, updateInterview]);
@@ -158,7 +162,7 @@ export const InterviewRoomPage: React.FC = () => {
     setRemainingSeconds(initialRem);
 
     if (initialRem <= 0) {
-      if (!isEndingRef.current) {
+      if (!endingSessionIdRef.current) {
         handleEndInterview();
       }
       return;
@@ -170,7 +174,7 @@ export const InterviewRoomPage: React.FC = () => {
 
       if (rem <= 0) {
         clearInterval(interval);
-        if (!isEndingRef.current) {
+        if (!endingSessionIdRef.current) {
           handleEndInterview();
         }
       }
@@ -221,19 +225,24 @@ export const InterviewRoomPage: React.FC = () => {
     if (
       !hasEval &&
       !autoEvaluatedSessionsRef.current.has(activeSession.id) &&
-      !isEndingRef.current
+      endingSessionIdRef.current !== activeSession.id
     ) {
-      autoEvaluatedSessionsRef.current.add(activeSession.id);
-      setIsEnding(true);
-      apiCompleteInterview(activeSession.id)
+      const targetSessionId = activeSession.id;
+      autoEvaluatedSessionsRef.current.add(targetSessionId);
+      endingSessionIdRef.current = targetSessionId;
+      setEndingSessionId(targetSessionId);
+      apiCompleteInterview(targetSessionId)
         .then((updated) => {
           if (updated) {
-            setActiveSession(updated);
+            setActiveSession((prev) => (prev && prev.id === targetSessionId ? updated : prev));
             updateInterview(updated);
           }
         })
         .finally(() => {
-          setIsEnding(false);
+          if (endingSessionIdRef.current === targetSessionId) {
+            endingSessionIdRef.current = null;
+            setEndingSessionId(null);
+          }
         });
     }
 
@@ -255,7 +264,10 @@ export const InterviewRoomPage: React.FC = () => {
         if (fresh.status === 'completed' && freshHasEval) {
           setActiveSession(fresh);
           updateInterview(fresh);
-          setIsEnding(false);
+          if (endingSessionIdRef.current === id) {
+            endingSessionIdRef.current = null;
+            setEndingSessionId(null);
+          }
           clearInterval(interval);
         } else if (
           fresh.status !== activeSession.status ||
@@ -483,11 +495,11 @@ export const InterviewRoomPage: React.FC = () => {
               variant="secondary"
               size="sm"
               onClick={() => setShowFinishDialog(true)}
-              disabled={isEnding}
+              disabled={isCurrentSessionEnding}
               className="h-8 px-2 sm:px-3 gap-1.5 text-xs text-destructive hover:bg-destructive/10 cursor-pointer"
               title={t.header.finish}
             >
-              {isEnding ? (
+              {isCurrentSessionEnding ? (
                 <ThinkingOrb state="working" size={20} />
               ) : (
                 <StopCircle className="h-3.5 w-3.5" />
@@ -529,7 +541,7 @@ export const InterviewRoomPage: React.FC = () => {
         <ChatInterface
           session={activeSession}
           onSessionUpdate={handleSessionUpdate}
-          isEnding={isEnding}
+          isEnding={isCurrentSessionEnding}
         />
       </main>
 

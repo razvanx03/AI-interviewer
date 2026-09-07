@@ -16,6 +16,7 @@ from .prompts import (
     build_chunk_evaluation_prompt,
     build_final_evaluation_aggregation_prompt,
     build_evaluation_report_prompt,
+    parse_transcript_into_qa_rounds,
     is_wrapup_or_evaluation_message,
 )
 from .chunking import SemanticTextSplitter, TimelineExtractor
@@ -57,6 +58,7 @@ __all__ = [
     "build_chunk_evaluation_prompt",
     "build_final_evaluation_aggregation_prompt",
     "build_evaluation_report_prompt",
+    "parse_transcript_into_qa_rounds",
     "is_wrapup_or_evaluation_message",
     "SemanticTextSplitter",
     "TimelineExtractor",

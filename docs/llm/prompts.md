@@ -39,6 +39,7 @@ Assembles the real-time system prompt defining the AI Interviewer persona and dy
 
 ### `build_next_question_prompt`
 - Acknowledges candidate's answer and asks the next question on `next_topic`.
+- Enforces a strict, absolute anti-repetition mandate prohibiting the re-asking or rephrasing of previous questions or `last_question`.
 - When `is_final_wrap_up=True`: Generates a concise closing thank-you message and emits `[INTERVIEW_COMPLETE]`. Explicitly prohibits inviting the candidate to ask further questions or reply since the chat terminates immediately.
 
 ---
@@ -49,6 +50,6 @@ Assembles the real-time system prompt defining the AI Interviewer persona and dy
 - **`build_screening_prompt`**: Scores and ranks multi-candidate CV pools against Job Description.
 - **`build_conversation_summary_prompt`**: Generates dense progressive summaries for context window management.
 - **`parse_transcript_into_qa_rounds`**: Robust transcript parser that intelligently merges clarification inquiries into parent technical questions and ignores closing thank-you turns, preventing ghost questions and artificial grading penalties.
-- **`build_chunk_evaluation_prompt` & `build_final_evaluation_aggregation_prompt`**: Map-Reduce chunked evaluation for long sessions.
-- **`build_evaluation_report_prompt`**: Fair single-pass evaluation distinguishing clarifications, language switches, refusals, and substantive answers.
+- **`build_chunk_evaluation_prompt` & `build_final_evaluation_aggregation_prompt`**: Map-Reduce chunked evaluation for long sessions. Enforces symmetric structured schemas for both `strengths` and `weaknesses` with explicit `question_id`, `question_text`, `response_text`, and `explanation` fields. Injects session coverage metrics and enforces strict coverage penalties for early session conclusion.
+- **`build_evaluation_report_prompt`**: Fair single-pass evaluation distinguishing clarifications, language switches, refusals, and substantive answers with structured `strengths` and `weaknesses` dictionaries. Enforces mandatory session coverage evaluation and early termination score bounding while guaranteeing immunity for administrative language switches.
 

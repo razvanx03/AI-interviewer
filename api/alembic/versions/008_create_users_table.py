@@ -1,10 +1,11 @@
-﻿"""create users table and seed initial admin account
+"""create users table and seed initial admin account
 
 Revision ID: 008_create_users_table
 Revises: 007_add_time_limit_minutes
 Create Date: 2026-08-29 15:15:00.000000
 """
 from typing import Sequence, Union
+import os
 import uuid
 import datetime
 from alembic import op
@@ -33,26 +34,30 @@ def upgrade() -> None:
     op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
     op.create_index(op.f('ix_users_id'), 'users', ['id'], unique=False)
 
-    # Seed initial default admin user
-    now = datetime.datetime.now(datetime.timezone.utc)
-    salt = bcrypt.gensalt()
-    admin_pw_hash = bcrypt.hashpw(b'admin', salt).decode('utf-8')
+    # Seed initial admin user if env vars are present during migration;
+    # otherwise startup lifespan (ensure_initial_admin) handles mandatory seeding with fast-fail validation.
+    admin_email = os.getenv("ADMIN_EMAIL")
+    admin_password = os.getenv("ADMIN_PASSWORD")
+    if admin_email and admin_password:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        salt = bcrypt.gensalt()
+        admin_pw_hash = bcrypt.hashpw(admin_password.encode("utf-8"), salt).decode('utf-8')
 
-    op.bulk_insert(
-        users_table,
-        [
-            {
-                'id': str(uuid.uuid4()),
-                'email': 'admin@ai-interviewer.com',
-                'hashed_password': admin_pw_hash,
-                'full_name': 'Lead Recruiter Admin',
-                'role': 'admin',
-                'is_active': True,
-                'created_at': now,
-                'updated_at': now,
-            }
-        ]
-    )
+        op.bulk_insert(
+            users_table,
+            [
+                {
+                    'id': str(uuid.uuid4()),
+                    'email': admin_email,
+                    'hashed_password': admin_pw_hash,
+                    'full_name': 'Lead Recruiter Admin',
+                    'role': 'admin',
+                    'is_active': True,
+                    'created_at': now,
+                    'updated_at': now,
+                }
+            ]
+        )
 
 def downgrade() -> None:
     op.drop_index(op.f('ix_users_id'), table_name='users')

@@ -13,3 +13,6 @@
 - `JWT_SECRET_KEY`: Signed secret for admin JWT tokens. Mandatory from `.env` (fails fast on startup if missing).
 - `JWT_ALGORITHM`: `"HS256"`
 - `ACCESS_TOKEN_EXPIRE_MINUTES`: Token lifetime in minutes (default 10080 = 7 days).
+- `ADMIN_EMAIL`: Initial administrator email address. Mandatory from `.env` (fails fast on startup if missing).
+- `ADMIN_PASSWORD`: Initial administrator password. Mandatory from `.env` (fails fast on startup if missing).
+

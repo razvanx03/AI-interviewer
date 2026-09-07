@@ -35,6 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import settings
 from db.session import init_db
+from db.init_admin import ensure_initial_admin
 from router import api_router
 
 @asynccontextmanager
@@ -43,8 +44,9 @@ async def lifespan(app: FastAPI):
     try:
         await init_db()
         logger.info("PostgreSQL database tables and connections verified successfully.")
+        await ensure_initial_admin()
     except Exception as exc:
-        logger.error("FATAL: Could not initialize database connection: %s", exc, exc_info=True)
+        logger.error("FATAL: Could not initialize database or admin account: %s", exc, exc_info=True)
         raise
     yield
     logger.info("Shutting down API server gracefully...")

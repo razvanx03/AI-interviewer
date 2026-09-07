@@ -19,6 +19,7 @@ export interface CandidateItem {
   cvRawText?: string;
   file?: File | null;
   fileSizeFormatted?: string;
+  isExtracting?: boolean;
 }
 
 export interface CandidateScreeningResult {

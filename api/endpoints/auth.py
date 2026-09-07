@@ -69,7 +69,13 @@ async def login(
 async def logout(response: Response):
     """Clear HttpOnly access_token cookie."""
     is_prod = settings.ENVIRONMENT == "production"
-    response.delete_cookie(key="access_token", path="/", secure=is_prod, samesite="lax")
+    response.delete_cookie(
+        key="access_token",
+        path="/",
+        httponly=True,
+        secure=is_prod,
+        samesite="lax",
+    )
     return {"message": "Logged out successfully"}
 
 @router.get("/me", response_model=UserResponse)

@@ -184,8 +184,8 @@ async def async_client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, 
 
 
 @pytest_asyncio.fixture(scope="function")
-async def test_user(db_session: AsyncSession) -> User:
-    """Create or retrieve a standard admin test user in the database."""
+async def test_user(db_session: AsyncSession) -> AsyncGenerator[User, None]:
+    """Create a standard admin test user in the database and automatically clean up after test execution."""
     user_id = str(uuid.uuid4())[:8]
     user = User(
         id=user_id,
@@ -198,7 +198,17 @@ async def test_user(db_session: AsyncSession) -> User:
     db_session.add(user)
     await db_session.commit()
     await db_session.refresh(user)
-    return user
+    try:
+        yield user
+    finally:
+        try:
+            from sqlalchemy import delete as sa_delete
+            await db_session.execute(sa_delete(User).where(User.id == user.id))
+            await db_session.commit()
+        except Exception as exc:
+            import logging
+            logging.getLogger("test").warning("Failed to clean up test user: %s", exc)
+            await db_session.rollback()
 
 
 @pytest.fixture(scope="function")

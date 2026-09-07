@@ -194,3 +194,63 @@ class TestInterviewService:
             assert last_msg.role.value == "assistant"
         finally:
             await interview_service.delete_interview(db_session, interview.id)
+
+    @pytest.mark.asyncio
+    async def test_early_finish_coverage_weighting_and_unassessed_topics(
+        self, db_session: AsyncSession
+    ):
+        """Verify that early termination with partial topic coverage scales down score and lists unassessed topics."""
+        # Create an interview with 9 planned topics
+        req = InterviewCreate(
+            job_title="Backend Engineer",
+            job_description=(
+                "- RESTful API and microservices architecture\n"
+                "- PostgreSQL, database indexing, and query optimization\n"
+                "- Redis caching and pub/sub messaging\n"
+                "- Distributed tracing and observability with Prometheus\n"
+                "- Background job processing with Celery or RabbitMQ\n"
+                "- Docker, containerization, and Kubernetes\n"
+                "- Security, OAuth2, and PCI-DSS compliance\n"
+                "- Automated testing with PyTest and CI/CD pipelines\n"
+                "- Concurrency, async programming, and system resilience\n"
+            ),
+            candidate_name="Test Candidate",
+            experience_level=ExperienceLevel.MID,
+            time_limit_minutes=None,  # Untimed (defaults to 9 topics)
+        )
+        interview = await interview_service.create_interview(db_session, req)
+        try:
+            assert len(interview.topics_plan) == 9
+
+            # Answer Question 1
+            await interview_service.add_candidate_message_and_respond(
+                db_session,
+                interview.id,
+                "I would design a stateless REST API with FastAPI and connection pooling.",
+            )
+
+            # Answer Question 2
+            await interview_service.add_candidate_message_and_respond(
+                db_session,
+                interview.id,
+                "I use PostgreSQL with composite indexes and explain analyze to profile queries.",
+            )
+
+            # Now early finish before answering Question 3 or the rest of the 9 topics
+            completed = await interview_service.complete_interview(
+                db=db_session, interview_id=interview.id
+            )
+            assert completed.status == InterviewStatus.COMPLETED
+
+            messages = await interview_service.get_messages(db_session, interview.id)
+            report_msg = messages[-1].content
+
+            # Evaluated score should reflect coverage penalty (2/9 coverage ~ 22%)
+            # Even if raw score from MockLLM was 8.8, 8.8 * (2/9) ~ 2.0 / 10
+            assert "Evaluare Generală AI:" in report_msg or "Overall AI Assessment:" in report_msg
+            assert "No Hire" in report_msg
+            # Unassessed topics must be listed
+            assert "Neevaluat - Sesiune finalizată" in report_msg or "Unassessed - Session Concluded" in report_msg
+            assert "Acoperire Sesiune:" in report_msg or "Session Coverage:" in report_msg
+        finally:
+            await interview_service.delete_interview(db_session, interview.id)

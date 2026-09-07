@@ -373,52 +373,60 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
           {/* Completed Interview Banner or Admin Generating Card */}
           {(session.status === 'completed' || session.status === 'finishing') &&
-            (isAdmin &&
-            (isEnding ||
-              session.status === 'finishing' ||
-              !session.messages.some((m) => parseMessageEvaluation(m).hasEvaluation)) ? (
-              <div className="my-4 sm:my-6 rounded-xl border border-primary/40 bg-card p-5 sm:p-6 shadow-sm space-y-3 text-center animate-pulse">
-                <div className="mx-auto mb-2 flex items-center justify-center">
-                  <ThinkingOrb state="working" size={64} />
+            (() => {
+              const hasEvaluation = session.messages.some(
+                (m) => parseMessageEvaluation(m).hasEvaluation
+              );
+              if (isAdmin && !hasEvaluation && (isEnding || session.status === 'finishing')) {
+                return (
+                  <div className="my-4 sm:my-6 rounded-xl border border-primary/40 bg-card p-5 sm:p-6 shadow-sm space-y-3 text-center animate-pulse">
+                    <div className="mx-auto mb-2 flex items-center justify-center">
+                      <ThinkingOrb state="working" size={64} />
+                    </div>
+                    <h4 className="text-sm sm:text-base font-bold text-foreground">
+                      {session.language === 'ro'
+                        ? 'Sesiune în Curs de Finalizare • Se generează raportul de evaluare...'
+                        : 'Finalizing Interview Session • Generating Evaluation Report...'}
+                    </h4>
+                    <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
+                      {session.language === 'ro'
+                        ? 'AI-ul analizează transcrierea completă a răspunsurilor și sintetizează scorurile tehnice, punctele forte și ariile de îmbunătățire.'
+                        : 'The AI is analyzing the full interview transcript and synthesizing technical scores, strengths, and areas for improvement.'}
+                    </p>
+                  </div>
+                );
+              }
+              if (!isAdmin && session.status === 'finishing') {
+                return (
+                  <div className="my-4 sm:my-6 rounded-xl border border-amber-500/40 bg-card p-5 sm:p-6 shadow-sm space-y-3 text-center animate-pulse">
+                    <div className="mx-auto mb-2 flex items-center justify-center">
+                      <ThinkingOrb state="working" size={64} />
+                    </div>
+                    <h4 className="text-sm sm:text-base font-bold text-foreground">
+                      {session.language === 'ro'
+                        ? 'Sesiune în Curs de Finalizare...'
+                        : 'Finalizing Interview Session...'}
+                    </h4>
+                    <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
+                      {session.language === 'ro'
+                        ? 'Îți mulțumim pentru participare! Raportul tău tehnic este în curs de înregistrare.'
+                        : 'Thank you for participating! Your technical assessment is being finalized.'}
+                    </p>
+                  </div>
+                );
+              }
+              return (
+                <div className="my-4 sm:my-6 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 sm:p-5 text-center">
+                  <div className="mx-auto mb-2 flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-600">
+                    <CheckCircle2 className="h-5 w-5 sm:h-6 sm:w-6" />
+                  </div>
+                  <h4 className="text-sm sm:text-base font-bold text-foreground">
+                    {t.chat.completedTitle}
+                  </h4>
+                  <p className="mt-1 text-xs text-muted-foreground">{t.chat.completedDesc}</p>
                 </div>
-                <h4 className="text-sm sm:text-base font-bold text-foreground">
-                  {session.language === 'ro'
-                    ? 'Sesiune în Curs de Finalizare • Se generează raportul de evaluare...'
-                    : 'Finalizing Interview Session • Generating Evaluation Report...'}
-                </h4>
-                <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
-                  {session.language === 'ro'
-                    ? 'AI-ul analizează transcrierea completă a răspunsurilor și sintetizează scorurile tehnice, punctele forte și ariile de îmbunătățire.'
-                    : 'The AI is analyzing the full interview transcript and synthesizing technical scores, strengths, and areas for improvement.'}
-                </p>
-              </div>
-            ) : session.status === 'finishing' ? (
-              <div className="my-4 sm:my-6 rounded-xl border border-amber-500/40 bg-card p-5 sm:p-6 shadow-sm space-y-3 text-center animate-pulse">
-                <div className="mx-auto mb-2 flex items-center justify-center">
-                  <ThinkingOrb state="working" size={64} />
-                </div>
-                <h4 className="text-sm sm:text-base font-bold text-foreground">
-                  {session.language === 'ro'
-                    ? 'Sesiune în Curs de Finalizare...'
-                    : 'Finalizing Interview Session...'}
-                </h4>
-                <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
-                  {session.language === 'ro'
-                    ? 'Îți mulțumim pentru participare! Raportul tău tehnic este în curs de înregistrare.'
-                    : 'Thank you for participating! Your technical assessment is being finalized.'}
-                </p>
-              </div>
-            ) : (
-              <div className="my-4 sm:my-6 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 sm:p-5 text-center">
-                <div className="mx-auto mb-2 flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-600">
-                  <CheckCircle2 className="h-5 w-5 sm:h-6 sm:w-6" />
-                </div>
-                <h4 className="text-sm sm:text-base font-bold text-foreground">
-                  {t.chat.completedTitle}
-                </h4>
-                <p className="mt-1 text-xs text-muted-foreground">{t.chat.completedDesc}</p>
-              </div>
-            ))}
+              );
+            })()}
 
           <div ref={messagesEndRef} />
         </div>
@@ -427,10 +435,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       {/* Docked Bottom Area */}
       {(!isAdmin ||
         (session.status !== 'completed' && session.status !== 'finishing') ||
-        isEnding) && (
+        (isEnding && !session.messages.some((m) => parseMessageEvaluation(m).hasEvaluation))) && (
         <div className="border-t border-border bg-card/60 p-3 sm:p-4 backdrop-blur">
           <div className="mx-auto max-w-3xl">
-            {isEnding || session.status === 'finishing' ? (
+            {(isEnding || session.status === 'finishing') &&
+            !session.messages.some((m) => parseMessageEvaluation(m).hasEvaluation) ? (
               <div className="flex items-center justify-center gap-2.5 py-3 text-xs text-muted-foreground animate-pulse">
                 <ThinkingOrb state="working" size={20} />
                 <span>

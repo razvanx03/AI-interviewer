@@ -74,8 +74,7 @@ The **AI-Powered Job Interviewer** is a modern, privacy-centric platform designe
   - `SemanticTextSplitter`: Recursive character text splitting (500 chars, 50 overlap) respecting semantic boundaries.
   - `TimelineExtractor`: Section-aware tenure calculator isolating verified employment from university/high school education, student clubs, and courses.
   - `OllamaProvider.embed_documents` / `embed_text`: Generates 768-dim vector embeddings using `nomic-embed-text`.
-  - `pgvector`: PostgreSQL vector extension storing chunks in `cv_chunks` with `candidate_id` foreign key index and HNSW cosine similarity index.
-  - `ScreeningService`: Multi-PDF semantic ingestion, unique candidate ID isolation, domain relevancy classification (`_classify_candidate_domain`), domain score ceilings (`WEB_BACKEND`, `DATA_ENGINEERING`, `EMBEDDED_AUTOMOTIVE`, `INDUSTRIAL_PLC`, `NON_IT`, `BLANK_FORM`), and comparative RAG synthesis.
+  - `ScreeningService`: Multi-PDF semantic ingestion, unique candidate ID isolation, domain relevancy classification (`_classify_candidate_domain`), domain score ceilings (`WEB_BACKEND`, `DATA_ENGINEERING`, `EMBEDDED_AUTOMOTIVE`, `INDUSTRIAL_PLC`, `NON_IT`, `BLANK_FORM`), comparative RAG synthesis, and deterministic tie-breaking by verified `experience_years` when `match_score` is equal.
 - **Document Processing**:
   - `DocumentExtractor`: In-memory PDF (`pypdf` + `pypdfium2` OCR) and DOCX (`python-docx` + embedded images OCR) extraction.
   - `CVParser`: Transforms raw text into structured JSON via Qwen LLM with strict fail-fast validation (zero mock/heuristic fallbacks).

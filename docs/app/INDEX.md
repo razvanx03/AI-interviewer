@@ -17,6 +17,7 @@ The `app/` directory houses the frontend Single Page Application (SPA) built wit
 - [`pages/`](pages/)
   - [`home_page.md`](pages/home_page.md): `HomePage.tsx`
   - [`interview_room_page.md`](pages/interview_room_page.md): `InterviewRoomPage.tsx`
+  - [`login_page.md`](pages/login_page.md): `LoginPage.tsx`
 - [`types/`](types/)
   - [`index.md`](types/index.md): TypeScript data models & DTOs
 

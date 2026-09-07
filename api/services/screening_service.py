@@ -408,8 +408,11 @@ class ScreeningService:
                 gaps,
             )
 
-        # 7. Sort candidates descending by match_score
-        results.sort(key=lambda x: x["match_score"], reverse=True)
+        # 7. Sort candidates descending by match_score, breaking ties with verified experience_years
+        results.sort(
+            key=lambda x: (x.get("match_score", 0), x.get("experience_years", 0.0)),
+            reverse=True,
+        )
 
         # 8. Honor selected candidate if specified; otherwise select #1
         selected_cand = None

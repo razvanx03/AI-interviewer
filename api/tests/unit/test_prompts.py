@@ -246,3 +246,4 @@ class TestPromptEngineering:
         assert rounds[0]["question"] == "Cum ai gestiona consistența datelor într-un sistem distribuit?"
         assert "procesarea idempotentă" in rounds[0]["answer"]
         assert "Clarification Context: Candidate proactively clarified" in rounds[0]["answer"]
+

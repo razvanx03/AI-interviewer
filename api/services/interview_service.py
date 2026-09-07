@@ -32,6 +32,7 @@ from llm import (
     build_both_response_prompt,
     build_refusal_response_prompt,
     build_next_question_prompt,
+    parse_transcript_into_qa_rounds,
     is_wrapup_or_evaluation_message,
 )
 from llm.agent import interview_graph, InterviewState
@@ -121,7 +122,11 @@ def detect_candidate_language(text: str, previous_lang: Optional[str] = "en") ->
         return "en"
     return previous_lang or "en"
 
-def _format_eval_feedback_section(items: List[Any], is_ro: bool = False) -> str:
+def _format_eval_feedback_section(
+    items: List[Any],
+    is_ro: bool = False,
+    qa_rounds_map: Optional[Dict[int, Dict[str, Any]]] = None,
+) -> str:
     """Format evaluation strengths/weaknesses into a clean Markdown table or formatted bullet points."""
     if not items:
         return ""
@@ -173,14 +178,23 @@ def _format_eval_feedback_section(items: List[Any], is_ro: bool = False) -> str:
             "| :--- | :--- | :--- |",
         ]
         for idx, it in enumerate(dict_items, start=1):
-            qid = (
+            raw_qid = (
                 it.get("question_id")
                 or it.get("q_id")
                 or it.get("question_number")
                 or it.get("round")
-                or idx
             )
-            
+            num_qid: Optional[int] = None
+            if raw_qid is not None:
+                try:
+                    match = re.search(r'\d+', str(raw_qid))
+                    if match:
+                        num_qid = int(match.group(0))
+                except (ValueError, TypeError):
+                    pass
+
+            qid = num_qid if num_qid is not None else idx
+
             q_text = (
                 it.get("question_text")
                 or it.get("question_summary")
@@ -189,7 +203,14 @@ def _format_eval_feedback_section(items: List[Any], is_ro: bool = False) -> str:
                 or ""
             )
             q_text_str = str(q_text).strip()
-            
+
+            # If question text is empty or just the question id, lookup from qa_rounds_map
+            if (not q_text_str or q_text_str.lower() == str(qid).lower()) and qa_rounds_map and num_qid in qa_rounds_map:
+                mapped_q = qa_rounds_map[num_qid].get("question", "").strip()
+                if mapped_q:
+                    first_line = mapped_q.split("\n")[0].strip()
+                    q_text_str = first_line[:120]
+
             # Format clean question label with topic/question text
             q_prefix = f"**Întrebarea {qid}**" if is_ro else f"**Question {qid}**"
             if q_text_str and q_text_str.lower() != str(qid).lower():
@@ -216,11 +237,25 @@ def _format_eval_feedback_section(items: List[Any], is_ro: bool = False) -> str:
                 or it.get("quote")
                 or ""
             ).strip()
-            resp_clean = resp.replace("\n", " ").replace("|", "\\|")
+
+            # If response is missing or marked as [NO RESPONSE], verify whether candidate answered in the transcript
+            if (not resp or "[NO RESPONSE" in resp.upper()) and qa_rounds_map and num_qid in qa_rounds_map:
+                real_ans = qa_rounds_map[num_qid].get("answer", "").strip()
+                if real_ans and not ("[NO RESPONSE" in real_ans.upper()):
+                    resp = real_ans
+
+            resp_clean = resp.replace("\n", " ").replace("|", "\\|").strip()
             if not resp_clean or "[NO RESPONSE" in resp_clean.upper():
-                resp_disp = "*(Fără răspuns)*" if is_ro else "*(No response provided)*"
+                if "BEFORE REACHING TOPIC" in resp_clean.upper() or "UNASSESSED" in resp_clean.upper():
+                    resp_disp = "*(Neevaluat - Sesiune finalizată prematur)*" if is_ro else "*(Unassessed - Session Concluded Early)*"
+                else:
+                    resp_disp = "*(Fără răspuns)*" if is_ro else "*(No response provided)*"
             else:
-                resp_disp = f"_{resp_clean}_"
+                if len(resp_clean) > 130:
+                    snippet = resp_clean[:127].rstrip() + "..."
+                else:
+                    snippet = resp_clean
+                resp_disp = f"_{snippet}_"
 
             fb = str(
                 it.get("explanation")
@@ -278,15 +313,31 @@ def _format_eval_feedback_section(items: List[Any], is_ro: bool = False) -> str:
 
     # Fallback to clean human-readable bullet points
     bullets = []
-    for it in items:
+    for idx, it in enumerate(items, start=1):
         if isinstance(it, dict):
             parts = []
-            qid = it.get("question_id") or it.get("q_id") or it.get("question_number")
+            raw_qid = it.get("question_id") or it.get("q_id") or it.get("question_number")
+            num_qid = None
+            if raw_qid is not None:
+                try:
+                    m = re.search(r'\d+', str(raw_qid))
+                    if m:
+                        num_qid = int(m.group(0))
+                except (ValueError, TypeError):
+                    pass
+            qid = num_qid if num_qid is not None else idx
             if qid:
                 parts.append(f"**Q{qid}**")
             resp = it.get("response_text") or it.get("response") or it.get("answer")
+            if (not resp or "[NO RESPONSE" in str(resp).upper()) and qa_rounds_map and num_qid in qa_rounds_map:
+                real_ans = qa_rounds_map[num_qid].get("answer", "").strip()
+                if real_ans and not ("[NO RESPONSE" in real_ans.upper()):
+                    resp = real_ans
             if resp:
-                parts.append(f"„{str(resp)[:80]}”")
+                resp_str = str(resp).replace("\n", " ").strip()
+                if len(resp_str) > 80:
+                    resp_str = resp_str[:77] + "..."
+                parts.append(f"„{resp_str}”")
             fb = it.get("explanation") or it.get("feedback") or it.get("assessment")
             if fb:
                 parts.append(f"→ {fb}")
@@ -582,23 +633,25 @@ class InterviewService:
             selected_candidate_name=data.candidate_name,
         )
 
-        # 1. Determine realistic target topic count based on allocated time limit
-        target_topic_count = 7
+        # 1. Determine realistic target topic count based on allocated time limit (+2 to each, 5 min = 3)
+        target_topic_count = 9
         if data.time_limit_minutes:
-            if data.time_limit_minutes <= 10:
+            if data.time_limit_minutes <= 5:
                 target_topic_count = 3
-            elif data.time_limit_minutes <= 15:
-                target_topic_count = 4
-            elif data.time_limit_minutes <= 20:
+            elif data.time_limit_minutes <= 10:
                 target_topic_count = 5
-            elif data.time_limit_minutes <= 25:
+            elif data.time_limit_minutes <= 15:
                 target_topic_count = 6
-            elif data.time_limit_minutes <= 30:
+            elif data.time_limit_minutes <= 20:
                 target_topic_count = 7
-            elif data.time_limit_minutes <= 40:
+            elif data.time_limit_minutes <= 25:
                 target_topic_count = 8
-            else:
+            elif data.time_limit_minutes <= 30:
+                target_topic_count = 9
+            elif data.time_limit_minutes <= 40:
                 target_topic_count = 10
+            else:
+                target_topic_count = 12
 
         # Extract dynamic interview topics from Job Description instantly
         topics_plan = []
@@ -621,6 +674,8 @@ class InterviewService:
                 "Automated Testing, CI/CD & Reliability",
                 "System Monitoring, Observability & Logging",
                 "High Availability, Fault Tolerance & Scaling",
+                "Domain-Driven Design, Modular Boundaries & Tech Debt",
+                "Concurrency, Asynchronous Messaging & Real-World Tradeoffs",
             ]
             topics_plan = default_pool[:target_topic_count]
         logger.info("[Interview %s] Dynamic Topics Plan (%d topics for %s min) initialized: %s", interview_id, len(topics_plan), data.time_limit_minutes, topics_plan)
@@ -1299,13 +1354,80 @@ class InterviewService:
             topics_plan=topics,
         )
 
-        overall_score = eval_report.get("overall_score", 0.0)
+        qa_rounds = parse_transcript_into_qa_rounds(transcript_history)
+        qa_rounds_map: Dict[int, Dict[str, Any]] = {}
+        for r in qa_rounds:
+            qid_val = r.get("question_id")
+            if qid_val is not None:
+                try:
+                    qa_rounds_map[int(qid_val)] = r
+                except (ValueError, TypeError):
+                    pass
+
+        # Count substantive answers
+        answered_rounds = [
+            r for r in qa_rounds
+            if r.get("answer") and not (
+                "[NO RESPONSE" in r.get("answer", "").upper()
+                or r.get("answer", "").strip().lower() in ("nu stiu", "n/a", "skip")
+            )
+        ]
+        answered_count = len(answered_rounds)
+        total_planned = len(topics) if topics else len(qa_rounds)
+        uncovered_topics = topics[covered_count:] if (topics and covered_count < len(topics)) else []
+
+        # Collect unassessed planned competencies that were never reached
+        unassessed_items = []
+        if uncovered_topics:
+            base_qid = len(qa_rounds)
+            for u_idx, u_topic in enumerate(uncovered_topics, start=1):
+                clean_top = u_topic.replace("\n", " ").strip()
+                unassessed_items.append({
+                    "question_id": base_qid + u_idx,
+                    "question_text": clean_top,
+                    "response_text": "[NO RESPONSE - SESSION CONCLUDED BEFORE REACHING TOPIC]",
+                    "explanation": (
+                        "Competență tehnică esențială rămasă neevaluată din cauza finalizării anticipate a sesiunii de interviu."
+                        if is_ro
+                        else "Core technical competency remained unassessed due to early conclusion of the interview session."
+                    ),
+                })
+
+        overall_score = float(eval_report.get("overall_score", 0.0))
         summary_text = eval_report.get("summary", "Technical interview evaluation completed.")
         strengths = eval_report.get("strengths", [])
-        strengths_str = _format_eval_feedback_section(strengths, is_ro=is_ro)
         weaknesses = eval_report.get("weaknesses", [])
-        weaknesses_str = _format_eval_feedback_section(weaknesses, is_ro=is_ro)
+
+        # Append unassessed topics to weaknesses
+        if unassessed_items:
+            if isinstance(weaknesses, list):
+                weaknesses = list(weaknesses) + unassessed_items
+            else:
+                weaknesses = unassessed_items
+
         rec_label = eval_report.get("recommendation", "hire").replace("_", " ").title()
+
+        # Deterministic Session Coverage Governance
+        if total_planned > 0 and answered_count < total_planned:
+            coverage_ratio = max(0.0, min(1.0, answered_count / total_planned))
+            scaled_score = round(overall_score * coverage_ratio, 1)
+            overall_score = max(1.0, scaled_score)
+
+            if coverage_ratio < 0.50:
+                rec_label = "No Hire"
+            elif coverage_ratio < 0.70 and rec_label.lower() in ("strong hire", "hire"):
+                rec_label = "Leaning No Hire"
+
+            cov_pct = round(coverage_ratio * 100)
+            cov_prefix = (
+                f"**Acoperire Sesiune:** Candidatul a răspuns la {answered_count} din cele {total_planned} competențe planificate ({cov_pct}% acoperire). "
+                if is_ro
+                else f"**Session Coverage:** Candidate answered {answered_count} of {total_planned} planned core competencies ({cov_pct}% coverage). "
+            )
+            summary_text = f"{cov_prefix}{summary_text}"
+
+        strengths_str = _format_eval_feedback_section(strengths, is_ro=is_ro, qa_rounds_map=qa_rounds_map)
+        weaknesses_str = _format_eval_feedback_section(weaknesses, is_ro=is_ro, qa_rounds_map=qa_rounds_map)
 
         intro_p = f"{preamble_text.strip()}\n\n" if preamble_text.strip() else ""
 

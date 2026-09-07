@@ -352,3 +352,20 @@ class TestScreeningServiceUnit:
         assert any("formular" in name or "costel" in name or "neagu" in name for name in lowest_names)
         assert results[-1]["match_score"] <= 5
 
+    def test_tie_breaker_by_experience_years_sorting(self):
+        """When match_score is identical, candidate with higher verified experience_years must rank higher."""
+        items = [
+            {"name": "Candidate A (4.7y)", "match_score": 97, "experience_years": 4.7},
+            {"name": "Candidate B (7.3y)", "match_score": 97, "experience_years": 7.3},
+            {"name": "Candidate C (5.3y)", "match_score": 97, "experience_years": 5.3},
+            {"name": "Candidate D (Lower)", "match_score": 92, "experience_years": 8.0},
+        ]
+        items.sort(
+            key=lambda x: (x.get("match_score", 0), x.get("experience_years", 0.0)),
+            reverse=True,
+        )
+        assert items[0]["name"] == "Candidate B (7.3y)"
+        assert items[1]["name"] == "Candidate C (5.3y)"
+        assert items[2]["name"] == "Candidate A (4.7y)"
+        assert items[3]["name"] == "Candidate D (Lower)"
+

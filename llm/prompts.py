@@ -635,12 +635,26 @@ INSTRUCTIONS:
 
     anti_rep_ro = ""
     anti_rep_en = ""
-    if previous_questions and not is_follow_up:
-        qs = [q.strip() for q in previous_questions if q.strip()][-3:]
+    if not is_follow_up:
+        last_q_clean = (last_question or "").strip()
+        qs = [q.strip() for q in (previous_questions or []) if q.strip()][-4:]
+        if last_q_clean and last_q_clean not in qs:
+            qs.append(last_q_clean)
+
         if qs:
             formatted_qs = "\n".join(f"- \"{q[:150]}\"" for q in qs)
-            anti_rep_ro = f"\nREGULĂ STRICTĂ ANTI-REPETIȚIE:\nÎntrebările puse anterior:\n{formatted_qs}\n- ESTE STRICT INTERZIS să repeți concepte/tehnologii abordate deja mai sus. Întreabă strict despre un aspect nou din: \"{next_topic}\".\n"
-            anti_rep_en = f"\nSTRICT ANTI-REPETITION DIRECTIVE:\nPrevious questions:\n{formatted_qs}\n- Do NOT repeat concepts asked above. Switch to a new topic in: \"{next_topic}\".\n"
+            anti_rep_ro = (
+                f"\nREGULĂ ABSOLUTĂ ANTI-REPETIȚIE:\n"
+                f"Întrebările puse anterior în acest interviu:\n{formatted_qs}\n"
+                f"- ESTE STRICT ȘI CATEGORIC INTERZIS să repeți, reformulezi sau reiei vreo întrebare de mai sus!\n"
+                f"- Treci obligatoriu la o temă/scenariu NOU din competența vizată: \"{next_topic}\".\n"
+            )
+            anti_rep_en = (
+                f"\nSTRICT ANTI-REPETITION MANDATE:\n"
+                f"Previous questions asked in this interview:\n{formatted_qs}\n"
+                f"- Under NO circumstances repeat, rephrase, or re-ask any question listed above!\n"
+                f"- You MUST formulate a completely distinct scenario on the new topic: \"{next_topic}\".\n"
+            )
 
     if language == "ro":
         follow_up_hint = (
@@ -811,11 +825,13 @@ def build_final_evaluation_aggregation_prompt(
     if topics_plan:
         covered = covered_topics_count or 0
         total = total_topics_count or len(topics_plan)
+        uncovered_topics = topics_plan[covered:] if covered < len(topics_plan) else []
+        uncovered_str = f"\n- UNASSESSED Planned Topics Left Behind ({len(uncovered_topics)}): {', '.join(uncovered_topics)}" if uncovered_topics else ""
         topics_summary = (
-            f"SESSION COVERAGE:\n"
-            f"- Planned Topics ({total}): {', '.join(topics_plan)}\n"
-            f"- Covered: {covered} of {total}\n"
-            f"- Time Limit: {time_limit_minutes if time_limit_minutes else 'Untimed'} min\n\n"
+            f"SESSION COVERAGE METRICS:\n"
+            f"- Planned Technical Competencies ({total}): {', '.join(topics_plan)}\n"
+            f"- Actually Covered / Attempted: {covered} out of {total} ({round(covered / total * 100, 1) if total else 100}% coverage){uncovered_str}\n"
+            f"- Allocated Time Limit: {time_limit_minutes if time_limit_minutes else 'Untimed'} minutes\n\n"
         )
 
     return f"""You are the Senior Hiring Committee Chair synthesizing multi-chunk evaluations into a final, unified hiring decision for {candidate_name} applying for {job_title} ({rubric['title']}).
@@ -834,6 +850,11 @@ SYNTHESIS INSTRUCTIONS:
 2. Fair Grading: Differentiate between valid answers vs clarifications vs skips. Do not penalize candidate for asking clarification questions.
 3. Strict Weakness Filtering: Exclude any candidate questions or inquiries from the weaknesses list. Include ONLY actual demonstrated technical gaps in candidate solutions.
 4. Extract key strengths strictly if backed by candidate's actual demonstrated knowledge.
+5. Mandatory Coverage & Early Termination Penalty (Critical):
+   - Review SESSION COVERAGE METRICS. If the candidate concluded the interview early, leaving planned technical competencies unassessed:
+   - If coverage < 50%, overall_score MUST NOT exceed 4.5/10 and recommendation MUST be "no_hire".
+   - If coverage is between 50% and 70%, recommendation cannot exceed "leaning_no_hire" and overall_score must be proportionally bounded.
+   - Core competencies left unassessed cannot be assumed as demonstrated.
 
 OUTPUT FORMAT (valid JSON ONLY):
 {{
@@ -842,7 +863,14 @@ OUTPUT FORMAT (valid JSON ONLY):
   "experience_score": <float between 1.0 and 10.0>,
   "overall_score": <float between 1.0 and 10.0>,
   "recommendation": <"strong_hire" | "hire" | "leaning_no_hire" | "no_hire">,
-  "strengths": [<list of specific positive observations backed strictly by answers>],
+  "strengths": [
+    {{
+      "question_id": <int or str>,
+      "question_text": "<summary of question>",
+      "response_text": "<snippet of candidate answer>",
+      "explanation": "<specific positive observation backed strictly by candidate's actual answer>"
+    }}
+  ],
   "weaknesses": [
     {{
       "question_id": <int or str>,
@@ -993,10 +1021,12 @@ def build_evaluation_report_prompt(
     if topics_plan:
         covered = covered_topics_count or 0
         total = total_topics_count or len(topics_plan)
+        uncovered_topics = topics_plan[covered:] if covered < len(topics_plan) else []
+        uncovered_str = f"\n- UNASSESSED Planned Topics Left Behind ({len(uncovered_topics)}): {', '.join(uncovered_topics)}" if uncovered_topics else ""
         topics_summary = (
-            f"SESSION COVERAGE:\n"
-            f"- Planned Technical Topics ({total}): {', '.join(topics_plan)}\n"
-            f"- Actually Covered Topics: {covered} out of {total}\n"
+            f"SESSION COVERAGE METRICS:\n"
+            f"- Planned Technical Competencies ({total}): {', '.join(topics_plan)}\n"
+            f"- Actually Covered / Attempted: {covered} out of {total} ({round(covered / total * 100, 1) if total else 100}% coverage){uncovered_str}\n"
             f"- Allocated Time Limit: {time_limit_minutes if time_limit_minutes else 'Untimed'} minutes\n\n"
         )
 
@@ -1028,6 +1058,11 @@ EVALUATION PRINCIPLES:
    - Actual technical answers: Grade thoroughly against the {rubric['title']} standard.
 3. ZERO-CREDIT FOR INTERVIEWER'S WORDS:
    - Concepts mentioned inside the interviewer's questions belong to the interviewer. Award credit only for what the candidate explained in their own words.
+4. MANDATORY COVERAGE & EARLY TERMINATION PENALTY (CRITICAL):
+   - Review SESSION COVERAGE METRICS carefully. An applicant CANNOT be recommended for hire or receive a high passing score if they only attempted a small fraction of the role's planned competencies (e.g. answering only 2 out of 7 or 9 planned topics).
+   - If coverage is below 50%, the overall_score MUST NOT exceed 4.5/10 and the recommendation MUST be "no_hire".
+   - If coverage is between 50% and 70%, the recommendation cannot exceed "leaning_no_hire" and overall_score must be proportionally bounded.
+   - Any planned core competencies that were not reached due to early session termination represent critical unassessed gaps.
 
 OUTPUT FORMAT:
 Output MUST be valid JSON ONLY (no markdown backticks, no commentary) matching this exact schema:
@@ -1038,7 +1073,12 @@ Output MUST be valid JSON ONLY (no markdown backticks, no commentary) matching t
   "overall_score": <float between 1.0 and 10.0>,
   "recommendation": <"strong_hire" | "hire" | "leaning_no_hire" | "no_hire">,
   "strengths": [
-    <list of specific positive technical observations backed by candidate's actual answers>
+    {{
+      "question_id": 1,
+      "question_text": "<summary of question asked>",
+      "response_text": "<exact candidate response snippet>",
+      "explanation": "<specific positive technical observation backed strictly by candidate's actual answer>"
+    }}
   ],
   "weaknesses": [
     {{

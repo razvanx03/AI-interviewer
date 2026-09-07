@@ -46,3 +46,17 @@ class TestAuthAndSecurity:
     def test_decode_invalid_token(self):
         assert decode_access_token("invalid.token.string") is None
         assert decode_access_token("") is None
+
+    @pytest.mark.asyncio
+    async def test_logout_clears_cookie(self):
+        from fastapi import Response
+        from endpoints.auth import logout
+
+        response = Response()
+        res = await logout(response)
+        assert res == {"message": "Logged out successfully"}
+
+        set_cookie = response.headers.get("set-cookie", "")
+        assert 'access_token=""' in set_cookie
+        assert "Max-Age=0" in set_cookie
+        assert "HttpOnly" in set_cookie
