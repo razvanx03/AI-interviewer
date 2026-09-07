@@ -26,11 +26,21 @@ async def login(
             User.email.ilike(identifier),
             User.email.ilike(f"{identifier}@%"),
         )
-    )
+    ).limit(2)
     result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
+    matching_users = result.scalars().all()
 
-    if not user or not verify_password(req.password, user.hashed_password):
+    # If 0 users or ambiguous username matching multiple accounts, reject with 401
+    if len(matching_users) != 1:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials. Please check your username/email and password.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = matching_users[0]
+
+    if not verify_password(req.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials. Please check your username/email and password.",

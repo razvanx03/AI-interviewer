@@ -45,12 +45,18 @@ async def extract_batch_cv_documents(
 
         try:
             raw_text, file_type = document_extractor.extract_text(filename, file_bytes)
-        except Exception as exc:
+        except ValueError as exc:
             logger.warning("Document extraction failed for %s: %s", filename, exc)
-            try:
-                raw_text = file_bytes.decode("utf-8", errors="ignore")
-            except Exception:
-                raw_text = ""
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Failed to extract readable text from '{filename}': {exc}",
+            )
+        except Exception as exc:
+            logger.error("Unexpected error during document extraction for %s: %s", filename, exc, exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Internal error processing document '{filename}': {exc}",
+            )
 
         raw_text = raw_text.replace("\x00", "")
         extracted_name = None

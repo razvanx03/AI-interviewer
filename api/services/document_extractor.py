@@ -49,7 +49,7 @@ class DocumentExtractor:
             try:
                 with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
                     namelist = zf.namelist()
-                    if "[Content_Types].xml" not in namelist and "word/document.xml" not in namelist:
+                    if "[Content_Types].xml" not in namelist or "word/document.xml" not in namelist:
                         raise ValueError("Corrupted DOCX document: Missing Word document structure.")
             except zipfile.BadZipFile as exc:
                 raise ValueError(f"Corrupted DOCX archive: {exc}") from exc

@@ -1,4 +1,4 @@
-﻿import { useContext } from 'react';
+import { useContext } from 'react';
 import { AdminAuthContext, AdminAuthContextType } from '@/context/admin-context';
 
 export const useAdminAuth = (): AdminAuthContextType => {

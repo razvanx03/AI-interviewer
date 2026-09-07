@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { InterviewSession } from '@/types';
 import { apiListInterviews, apiDeleteInterview } from '@/lib/api';
 import { getStoredInterviewIds, saveInterviewId, removeInterviewId } from '@/lib/storage';
