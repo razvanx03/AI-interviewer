@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from schemas.interview import InterviewCreate, ExperienceLevel, InterviewStatus
-from services.interview_service import interview_service
+from services.interview_service import interview_service, _format_eval_feedback_section
 from models.interview import Interview
 
 
@@ -252,5 +252,62 @@ class TestInterviewService:
             # Unassessed topics must be listed
             assert "Neevaluat - Sesiune finalizată" in report_msg or "Unassessed - Session Concluded" in report_msg
             assert "Acoperire Sesiune:" in report_msg or "Session Coverage:" in report_msg
+        finally:
+            await interview_service.delete_interview(db_session, interview.id)
+
+    def test_format_eval_feedback_recovers_from_qa_rounds_map_with_fallback_qid(self):
+        """When question_id is missing or non-numeric, qid falls back to idx and recovers text from qa_rounds_map."""
+        qa_rounds_map = {
+            1: {
+                "question": "Explain ACID properties in PostgreSQL.",
+                "answer": "Atomicity, Consistency, Isolation, and Durability guarantee reliable transactions.",
+            }
+        }
+        # Item with no question_id and empty question_text/response_text
+        items = [
+            {
+                "question_text": "",
+                "response_text": "",
+                "explanation": "Solid understanding of transactions.",
+            }
+        ]
+        result = _format_eval_feedback_section(items, is_ro=False, qa_rounds_map=qa_rounds_map)
+        assert "Explain ACID properties" in result
+        assert "Atomicity, Consistency, Isolation" in result
+
+    @pytest.mark.asyncio
+    async def test_coverage_under_50_percent_caps_overall_score_at_4_5(
+        self, db_session: AsyncSession
+    ):
+        """When coverage_ratio < 0.50, overall_score MUST NOT exceed 4.5/10."""
+        req = InterviewCreate(
+            job_title="Senior Python Architect",
+            job_description="\n".join([f"- Competency {i}" for i in range(1, 11)]),
+            candidate_name="High Scoring Candidate",
+            experience_level=ExperienceLevel.SENIOR,
+            time_limit_minutes=None,
+        )
+        interview = await interview_service.create_interview(db_session, req)
+        try:
+            # Answer 4 out of 10 topics (40% coverage < 50%)
+            for i in range(1, 5):
+                await interview_service.add_candidate_message_and_respond(
+                    db_session,
+                    interview.id,
+                    f"Thorough architectural answer for topic {i} with design patterns and scaling principles.",
+                )
+
+            completed = await interview_service.complete_interview(
+                db=db_session, interview_id=interview.id
+            )
+            assert completed.status == InterviewStatus.COMPLETED
+            messages = await interview_service.get_messages(db_session, interview.id)
+            report = messages[-1].content
+            assert "No Hire" in report
+            import re
+            m = re.search(r'(?:Overall AI Assessment|Evaluare Generală AI):\s*([\d\.]+)/10', report)
+            assert m is not None
+            score = float(m.group(1))
+            assert score <= 4.5
         finally:
             await interview_service.delete_interview(db_session, interview.id)

@@ -205,8 +205,8 @@ def _format_eval_feedback_section(
             q_text_str = str(q_text).strip()
 
             # If question text is empty or just the question id, lookup from qa_rounds_map
-            if (not q_text_str or q_text_str.lower() == str(qid).lower()) and qa_rounds_map and num_qid in qa_rounds_map:
-                mapped_q = qa_rounds_map[num_qid].get("question", "").strip()
+            if (not q_text_str or q_text_str.lower() == str(qid).lower()) and qa_rounds_map and qid in qa_rounds_map:
+                mapped_q = qa_rounds_map[qid].get("question", "").strip()
                 if mapped_q:
                     first_line = mapped_q.split("\n")[0].strip()
                     q_text_str = first_line[:120]
@@ -239,8 +239,8 @@ def _format_eval_feedback_section(
             ).strip()
 
             # If response is missing or marked as [NO RESPONSE], verify whether candidate answered in the transcript
-            if (not resp or "[NO RESPONSE" in resp.upper()) and qa_rounds_map and num_qid in qa_rounds_map:
-                real_ans = qa_rounds_map[num_qid].get("answer", "").strip()
+            if (not resp or "[NO RESPONSE" in resp.upper()) and qa_rounds_map and qid in qa_rounds_map:
+                real_ans = qa_rounds_map[qid].get("answer", "").strip()
                 if real_ans and not ("[NO RESPONSE" in real_ans.upper()):
                     resp = real_ans
 
@@ -329,8 +329,8 @@ def _format_eval_feedback_section(
             if qid:
                 parts.append(f"**Q{qid}**")
             resp = it.get("response_text") or it.get("response") or it.get("answer")
-            if (not resp or "[NO RESPONSE" in str(resp).upper()) and qa_rounds_map and num_qid in qa_rounds_map:
-                real_ans = qa_rounds_map[num_qid].get("answer", "").strip()
+            if (not resp or "[NO RESPONSE" in str(resp).upper()) and qa_rounds_map and qid in qa_rounds_map:
+                real_ans = qa_rounds_map[qid].get("answer", "").strip()
                 if real_ans and not ("[NO RESPONSE" in real_ans.upper()):
                     resp = real_ans
             if resp:
@@ -1415,6 +1415,7 @@ class InterviewService:
 
             if coverage_ratio < 0.50:
                 rec_label = "No Hire"
+                overall_score = min(4.5, overall_score)
             elif coverage_ratio < 0.70 and rec_label.lower() in ("strong hire", "hire"):
                 rec_label = "Leaning No Hire"
 
