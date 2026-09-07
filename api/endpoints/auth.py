@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 
@@ -47,7 +47,8 @@ async def login(
         data={"sub": user.id, "email": user.email, "role": user.role}
     )
 
-    # Set secure HttpOnly cookie for browser sessions
+    # Set secure HttpOnly cookie for browser sessions (secure=True in production)
+    is_prod = settings.ENVIRONMENT == "production"
     response.set_cookie(
         key="access_token",
         value=token,
@@ -55,7 +56,7 @@ async def login(
         samesite="lax",
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
-        secure=False,
+        secure=is_prod,
     )
 
     return TokenResponse(
@@ -67,7 +68,8 @@ async def login(
 @router.post("/logout")
 async def logout(response: Response):
     """Clear HttpOnly access_token cookie."""
-    response.delete_cookie(key="access_token", path="/")
+    is_prod = settings.ENVIRONMENT == "production"
+    response.delete_cookie(key="access_token", path="/", secure=is_prod, samesite="lax")
     return {"message": "Logged out successfully"}
 
 @router.get("/me", response_model=UserResponse)

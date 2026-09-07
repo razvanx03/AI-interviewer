@@ -18,14 +18,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog';
 import { SettingsMenu } from '@/components/settings/SettingsMenu';
 import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
 import { useLanguage } from '@/hooks/use-language';
@@ -33,8 +25,6 @@ import { useInterviews } from '@/hooks/use-interviews';
 import { useAdminAuth } from '@/hooks/use-admin-auth';
 import { InterviewSession } from '@/types';
 import { cn } from '@/lib/utils';
-import { apiClearEntireDatabase } from '@/lib/api';
-import { clearAllStoredInterviewIds } from '@/lib/storage';
 
 interface SwipeableHistoryItemProps {
   item: InterviewSession;
@@ -185,7 +175,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   mobileOpen,
   onMobileClose,
 }) => {
-  const { interviews, deleteInterview, refreshInterviews } = useInterviews();
+  const { interviews, deleteInterview } = useInterviews();
   const { isAdmin, adminEmail, logout } = useAdminAuth();
   const { id: activeId } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -194,26 +184,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [searchOpen, setSearchOpen] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
-  const [clearModalOpen, setClearModalOpen] = useState(false);
-  const [isClearing, setIsClearing] = useState(false);
-
-  // ==============================================================================
-  // [DEV ONLY - TEMPORARY TESTING HANDLER TO BE REMOVED LATER]
-  // ==============================================================================
-  const handleConfirmClearDatabase = async () => {
-    setIsClearing(true);
-    try {
-      await apiClearEntireDatabase();
-      clearAllStoredInterviewIds();
-      await refreshInterviews();
-      setClearModalOpen(false);
-      navigate('/');
-    } catch (err) {
-      console.error('Failed to clear database:', err);
-    } finally {
-      setIsClearing(false);
-    }
-  };
 
   const filteredInterviews = useMemo(() => {
     if (!searchTerm.trim()) return interviews;
@@ -313,17 +283,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {isAdmin && (
               <>
-                {/* [DEV ONLY] Collapsed Clear DB Button */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setClearModalOpen(true)}
-                  className="h-9 w-9 rounded-lg text-red-500 hover:bg-red-500/10 hover:text-red-600"
-                  title="[DEV ONLY] Clear Entire Database"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-
                 {/* New Interview Button */}
                 <Button
                   variant="ghost"
@@ -448,22 +407,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* ADMIN ONLY CONTROLS & INTERVIEW HISTORY */}
           {isAdmin ? (
             <>
-              {/* ================================================================= */}
-              {/* [DEV ONLY - TEMPORARY CLEAR DB BUTTON TO BE REMOVED LATER]       */}
-              {/* ================================================================= */}
-              <div className="px-3 pt-3 pb-0 shrink-0">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setClearModalOpen(true)}
-                  className="w-full justify-start gap-2 border-red-500/30 text-red-500 hover:bg-red-500/10 hover:text-red-600 shadow-2xs text-xs font-medium"
-                  title="[DEV ONLY] Truncate and clear all database tables"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  <span>Clear Entire DB (Dev)</span>
-                </Button>
-              </div>
-
               {/* Action: New Interview Button */}
               <div className="p-3 pb-2 shrink-0">
                 <Button
@@ -601,41 +544,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }}
         onConfirm={handleConfirmDelete}
       />
-
-      {/* ================================================================= */}
-      {/* [DEV ONLY - TEMPORARY CLEAR DB CONFIRMATION MODAL TO BE REMOVED]  */}
-      {/* ================================================================= */}
-      <Dialog open={clearModalOpen} onOpenChange={setClearModalOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <Trash2 className="h-5 w-5" />
-              Clear Entire Database (Dev)
-            </DialogTitle>
-            <DialogDescription>
-              This is a development testing utility. It will permanently truncate all interviews,
-              candidates, and chat transcripts in PostgreSQL. This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0 mt-2">
-            <Button
-              variant="outline"
-              onClick={() => setClearModalOpen(false)}
-              disabled={isClearing}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleConfirmClearDatabase}
-              disabled={isClearing}
-              className="gap-2"
-            >
-              {isClearing ? 'Clearing Database...' : 'Yes, Truncate Database'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 };

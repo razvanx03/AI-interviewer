@@ -22,13 +22,27 @@ export interface CandidateItem {
 }
 
 export interface CandidateScreeningResult {
+  id?: string;
   name: string;
   match_score: number;
   strengths: string[];
+  gaps?: string[];
+  matched_chunks?: string[];
   summary: string;
   is_selected: boolean;
   cv_filename?: string;
   cv_raw_text?: string;
+  experience_years?: number;
+  timeline_summary?: string;
+  tech_tenure?: Record<string, number>;
+  work_history?: Array<{
+    role?: string;
+    interval?: string;
+    duration_formatted?: string;
+    duration_months?: number;
+    technologies?: string[];
+    is_work?: boolean;
+  }>;
 }
 
 export interface CandidateScreeningResponse {

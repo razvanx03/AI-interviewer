@@ -1,35 +1,12 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
-from datetime import datetime
-from models.cv import ParsingStatus
+from pydantic import BaseModel
+from typing import List, Optional
 
-class CVParseResult(BaseModel):
-    id: str
+class ExtractedCandidateItem(BaseModel):
     filename: str
     file_type: str
-    file_size_bytes: int
-    storage_path: str
-    extracted_text: str
-    parsed_data: Dict[str, Any] = Field(default_factory=dict)
-    parsing_status: ParsingStatus
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-class CVResponse(BaseModel):
-    id: str
-    user_id: Optional[str] = None
-    interview_id: Optional[str] = None
-    file_name: str
-    file_type: str
-    file_size: int
-    storage_path: str
     raw_text: str
-    parsed_data: Optional[Dict[str, Any]] = None
-    parsing_status: ParsingStatus
-    created_at: datetime
-    updated_at: datetime
+    extracted_name: Optional[str] = None
+    file_size: int
 
-    class Config:
-        from_attributes = True
+class BatchExtractResponse(BaseModel):
+    candidates: List[ExtractedCandidateItem]

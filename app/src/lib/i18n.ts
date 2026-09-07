@@ -45,7 +45,7 @@ export const translations = {
       step2Subtitle: 'Upload candidate CVs for AI evaluation and screening',
       step3Title: 'Selection & Invitation',
       step3Subtitle: 'Review AI candidate ranking, copy invite link, or start live',
-      loadSample: 'Load Sample Candidates (3)',
+      loadSample: 'Load Sample Candidates (15)',
       fillJobSample: 'Prefill Sample Role',
       description:
         'Provide the job specifics and upload candidate CVs. The AI will screen and rank the candidates, select the best match, and conduct their technical interview.',
@@ -67,7 +67,8 @@ export const translations = {
       cvFormats: '(PDF, DOCX, TXT)',
       candidatePoolTitle: 'Candidates Queued for Screening',
       candidateCount: 'candidate(s) queued',
-      sampleLoadedToast: 'Loaded 3 sample candidate CVs with diverse profiles!',
+      clearAll: 'Clear All',
+      sampleLoadedToast: 'Loaded 15 sample candidate profiles for screening evaluation!',
       nextStep: 'Continue to Candidate Pool',
       prevStep: 'Back to Job Details',
       screenAndReview: 'Screen Candidates & Review Selection',
@@ -85,7 +86,7 @@ export const translations = {
       shareLinkTip:
         'Share this direct link with the candidate to let them complete the screening independently.',
       validationError: 'Please provide both a Job Title and Job Requirements before proceeding.',
-      noCandidatesError: 'Please upload at least one candidate CV or click Load Sample Candidates.',
+      noCandidatesError: 'Please upload at least one candidate CV before proceeding.',
     },
     screeningModal: {
       title: 'AI Candidate Screening & Selection',
@@ -184,7 +185,7 @@ export const translations = {
       step2Subtitle: 'Încarcă CV-uri pentru evaluare și triere AI',
       step3Title: 'Selecție & Invitație',
       step3Subtitle: 'Revizuiește selecția AI, copiază link-ul sau începe interviul live',
-      loadSample: 'Încarcă Candidați Exemplu (3)',
+      loadSample: 'Încarcă Candidați Exemplu (15)',
       fillJobSample: 'Completează Job Exemplu',
       description:
         'Introdu detaliile jobului și încarcă CV-urile candidaților. AI-ul va evalua candidații, va alege profilul optim și va conduce interviul tehnic cu acesta.',
@@ -206,7 +207,8 @@ export const translations = {
       cvFormats: '(PDF, DOCX, TXT)',
       candidatePoolTitle: 'Candidați Pregătiți pentru Evaluare',
       candidateCount: 'candidat(i) în așteptare',
-      sampleLoadedToast: 'S-au încărcat 3 profile demonstrative de candidați!',
+      clearAll: 'Șterge tot',
+      sampleLoadedToast: 'S-au încărcat 15 profile demonstrative de candidați pentru evaluare!',
       nextStep: 'Continuă către Candidați',
       prevStep: 'Înapoi la Detalii Job',
       screenAndReview: 'Evaluează Candidații & Vezi Rezultatul',
@@ -226,7 +228,7 @@ export const translations = {
         'Trimite acest link direct candidatului pentru a susține interviul independent.',
       validationError:
         'Te rugăm să completezi atât Titlul Jobului, cât și Cerințele înainte de a continua.',
-      noCandidatesError: 'Te rugăm să adaugi cel puțin un CV sau apasă Încarcă Candidați Exemplu.',
+      noCandidatesError: 'Te rugăm să încarci cel puțin un CV de candidat înainte de a continua.',
     },
     screeningModal: {
       title: 'Evaluare & Selecție AI Candidați',

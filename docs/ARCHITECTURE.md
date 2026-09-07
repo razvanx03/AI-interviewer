@@ -68,52 +68,91 @@ The **AI-Powered Job Interviewer** is a modern, privacy-centric platform designe
   - `POST /api/v1/interviews`: Creates interview and generates personalized AI opening question.
   - `POST /api/v1/interviews/{id}/stream`: Real-time token streaming via Server-Sent Events (SSE).
   - `POST /api/v1/interviews/{id}/complete`: Finalizes interview and triggers AI Evaluation Report.
-  - `POST /api/v1/cv/upload`: Validates magic bytes, extracts text in-memory with PaddleOCR fallback, parses structured CV data, stores original file, and records in PostgreSQL.
-  - `GET /api/v1/cv/{id}/download`: Downloads original PDF/DOCX document from storage.
-  - `DELETE /api/v1/interviews/admin/clear-all`: Developer utility to wipe state.
-- **Document Processing & Storage**:
+  - `POST /api/v1/cv/extract-batch`: In-memory multi-document text extraction (PDF/DOCX) returning sanitized text items.
+  - `POST /api/v1/interviews/screen`: Multi-candidate semantic screening via RAG and pgvector similarity search.
+- **RAG & Vector Screening Architecture**:
+  - `SemanticTextSplitter`: Recursive character text splitting (500 chars, 50 overlap) respecting semantic boundaries.
+  - `TimelineExtractor`: Section-aware tenure calculator isolating verified employment from university/high school education, student clubs, and courses.
+  - `OllamaProvider.embed_documents` / `embed_text`: Generates 768-dim vector embeddings using `nomic-embed-text`.
+  - `pgvector`: PostgreSQL vector extension storing chunks in `cv_chunks` with `candidate_id` foreign key index and HNSW cosine similarity index.
+  - `ScreeningService`: Multi-PDF semantic ingestion, unique candidate ID isolation, domain relevancy classification (`_classify_candidate_domain`), domain score ceilings (`WEB_BACKEND`, `DATA_ENGINEERING`, `EMBEDDED_AUTOMOTIVE`, `INDUSTRIAL_PLC`, `NON_IT`, `BLANK_FORM`), and comparative RAG synthesis.
+- **Document Processing**:
   - `DocumentExtractor`: In-memory PDF (`pypdf` + `pypdfium2` OCR) and DOCX (`python-docx` + embedded images OCR) extraction.
-  - `CVParser`: Transforms raw text into structured JSON via Qwen LLM.
-  - `CVService`: Filesystem storage (`storage/cvs/`) + PostgreSQL `cvs` metadata table.
+  - `CVParser`: Transforms raw text into structured JSON via Qwen LLM with strict fail-fast validation (zero mock/heuristic fallbacks).
+- **Test Suite & Verification Architecture (`api/tests/`)**:
+  - Automated unit and integration tests (100% green) covering all critical components:
+    - `test_document_extractor.py`: PDF/DOCX magic bytes validation, paragraph/table extraction, and error handling.
+    - `test_cv_parser.py`: LLM structured parsing and strict fail-fast error assertions.
+    - `test_ocr_service.py`: In-memory OCR, image conversion, and exception resilience.
+    - `test_ollama_provider.py`: Payload construction, streaming, JSON repair, and strict fail-fast embedding errors.
+    - `test_constants_and_sanitizer.py`: UTF-8/NFC sanitization, null byte removal, and constants invariants.
+    - `test_screening_service.py`: pgvector cosine search, timeline extraction, and candidate tenure weighting.
+    - `test_interview_service.py`: Dynamic opening, answer progression, and clarification state machine.
+    - `test_intent_classifier.py`: Clarification, refusal, profanity, and language detection.
+    - `test_prompts.py`: Seniority rubrics and bilingual prompt templates.
+    - `test_auth_service.py`: Password hashing, JWT creation, and expiry.
+    - `test_api_endpoints.py`: Integration testing of all REST and SSE endpoints.
 - **Migrations**: Version-controlled PostgreSQL migrations managed strictly via **Alembic** (`alembic/versions/`).
 
-### Dynamic Topic State Machine & Pacing
+### LangGraph Conversational Interview Workflow (`llm/agent/`)
 
-- **Dynamic Job Description Extraction**: Upon session creation, the backend extracts 4 to 6 core technical pillars directly from the Job Description (e.g., `["React 19 & TypeScript", "Python FastAPI", "PostgreSQL Optimization", "Docker & CI/CD"]`).
-- **Direct, Natural Opening Turn**:
-  - Greet candidate warmly in 1 natural sentence (with username sanitization, e.g. `Dariusbotezan2026` $\rightarrow$ `Darius`).
-  - Immediately pose **Question 1** on the first technical pillar extracted from the Job Description at the chosen seniority level (`MID`).
-  - Eliminates awkward robotic meta-intro dialogues (*"V-aș ruga să mă accepti..."* / *"Sesionul va dura..."*).
-- **Deterministic Intent Classification & Safety Bounds**:
-  - `CLARIFICATION`: Explains requested concept concisely (1-2 sentences) and repeats `active_question_text`. The active question is **NOT marked answered**.
-  - Consecutive clarifications are bounded by safety threshold (`CLARIFICATION_STEER_THRESHOLD = 3`).
-  - `REFUSAL_OR_DONT_KNOW`: Acknowledges supportively in 1 sentence and rotates to the next competency.
-  - `LANGUAGE_REQUEST`: Switches language dynamically (`ro` / `en`) and translates active question without penalty.
-  - `ANSWER`: Acknowledges candidate's answer, marks competency in `assessed_topics`, and moves to next question.
-- **Context Window Management & Progressive Summarization**:
-  - Token threshold monitoring (`CONTEXT_TOKEN_THRESHOLD_RATIO = 0.60`).
-  - Rolling window of recent messages (`RECENT_MESSAGES_WINDOW_COUNT = 6`).
-  - Progressive cumulative summary stored in PostgreSQL (`interviews.conversation_summary`).
-  - Map-Reduce chunked evaluation (`evaluate_interview`) for long transcripts.
+The multi-turn conversational interview lifecycle is fully orchestrated via a compiled **LangGraph `StateGraph`** (`llm/agent/graph.py`), replacing ad-hoc monolithic branching with modular, testable graph nodes:
+
+```
+[START]
+   │
+   ▼
+[process_candidate_response] (Router Node)
+   ├── intent: GREETING ──────────────► [start_interview] ──► [END]
+   ├── intent: CLARIFICATION ─────────► [detect_clarification] ──► [END]
+   ├── intent: LANGUAGE_SWITCH ───────► [language_switch] ──► [END]
+   ├── intent: PROFANE / OFF_TOPIC ───► [guardrail] ──► [END]
+   ├── intent: REFUSAL ───────────────► [detect_refusal]
+   │                                         ├── completed ────► [generate_final_evaluation] ──► [END]
+   │                                         └── active ───────► [END]
+   ├── intent: WRAP_UP ───────────────► [generate_final_evaluation] ──► [END]
+   └── intent: ANSWER ────────────────► [evaluate_answer]
+                                             ├── is_complete ──► [generate_final_evaluation] ──► [END]
+                                             ├── needs_follow_up ► [generate_follow_up] ────────► [END]
+                                             └── next_topic ───► [move_to_next_question] ──────► [END]
+```
+
+- **Graph State (`InterviewState`)**: Declared with `TypedDict` in `llm/agent/state.py` containing session metadata, active topic index, assessed topics, clarification counters, follow-up flags, and candidate message.
+- **Graph Nodes (`llm/agent/nodes.py`)**:
+  - `start_interview_node`: Greets candidate and generates first question on Topic 1.
+  - `process_candidate_response_node`: Classifies candidate intent (`ANSWER`, `CLARIFICATION`, `REFUSAL`, `LANGUAGE_SWITCH`, `WRAP_UP`, `PROFANE_LANGUAGE`, `OFF_TOPIC`).
+  - `detect_clarification_node`: Responds to clarifying questions concisely and redirects to active question.
+  - `detect_refusal_node`: Empathetically handles skip / "don't know", advances topic index, and formulates next prompt.
+  - `evaluate_answer_node`: Evaluates technical response, triggers follow-up for shallow answers, and monitors completion.
+  - `generate_follow_up_node`: Probes candidate's previous response deeper on the same topic.
+  - `move_to_next_question_node`: Formulates the technical question for the next planned competency.
+  - `language_switch_node`: Dynamically translates active prompt between Romanian and English.
+  - `generate_final_evaluation_node`: Concludes interview, appends `[INTERVIEW_COMPLETE]`, and triggers report generation.
+  - `guardrail_node`: Firmly and calmly steers inappropriate or off-topic messages back to the interview.
 
 ### LLM Module (`llm/`)
 
 - Standalone AI provider abstractions (`BaseLLMProvider`).
 - `OllamaProvider`: Native asynchronous HTTP client for local Qwen 3.5 8B model serving with sampling parameters and streaming SSE support.
+- **LangChain Integration**:
+  - `langchain-text-splitters`: `RecursiveCharacterTextSplitter` in `llm/chunking.py`.
+  - `langchain-ollama`: `OllamaEmbeddings` for query and document vectors.
+  - `langchain-core`: `JsonOutputParser` and standardized `Document` metadata extraction.
+- **LangGraph Integration**: Full conversational state graph in `llm/agent/`.
 - Modular, focused prompt templates in `llm/prompts.py` avoiding bloated system prompts.
 - **Fair Evaluation Principles**: Evaluator strictly differentiates clarifications and language switches from knowledge gaps, scoring only demonstrated technical proficiency.
 
 ### Automated Test Suite (`api/tests/`)
 
-- **Pytest Asyncio Test Suite**: 49 automated unit and integration tests executed in <5s without external Ollama dependencies.
-- **Unit Tests (`api/tests/unit/`)**:
-  - `test_prompts.py`: Seniority rubrics, Romanian 2nd person singular tone, direct question 1 generation, clarifications, skips, and evaluation aggregation.
-  - `test_intent_classifier.py`: Exact intent classification (`READY`, `CLARIFICATION`, `REFUSAL`, `LANGUAGE_REQUEST`, `ANSWER`), candidate name sanitizer, and response cleaner.
+- **Pytest Asyncio Test Suite**: 101 automated unit tests passing with 100% green:
+  - `test_interview_graph.py`: Comprehensive test suite verifying all 8 LangGraph state machine pathways.
   - `test_interview_service.py`: State machine transitions, clarification counters, language switching, and lifecycle management.
+  - `test_screening_service.py`: pgvector cosine search, LangChain embeddings, timeline extraction, and candidate tenure weighting.
+  - `test_document_extractor.py`: PDF/DOCX magic bytes validation, LangChain Document wrapping, and error handling.
+  - `test_prompts.py`: Seniority rubrics, Romanian 2nd person singular tone, direct question generation, and evaluations.
+  - `test_intent_classifier.py`: Exact intent classification, candidate name sanitizer, and response cleaner.
   - `test_auth_service.py`: Bcrypt password hashing, JWT encoding/decoding, and expiration.
-  - `test_cv_service.py`: Magic bytes validation, in-memory PDF/DOCX parsing, and heuristic extraction fallback.
-- **Integration Tests (`api/tests/integration/`)**:
-  - `test_api_endpoints.py`: End-to-end testing of `/api/v1/auth/*`, `/api/v1/interviews/*` (chat, streaming SSE, screening, lifecycle), and error boundaries.
+  - `test_cv_parser.py`: LLM structured parsing and strict fail-fast error assertions.
 
 ### Documentation & Docker
 

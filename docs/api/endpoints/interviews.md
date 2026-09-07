@@ -10,8 +10,6 @@
   - Response: `InterviewResponse` (HTTP 200)
 - `DELETE /api/v1/interviews/{interview_id}`: Deletes the interview and all associated messages.
   - Response: HTTP 204 (No Content)
-- `DELETE /api/v1/interviews/admin/clear-all`: **[DEV ONLY]** Truncates all tables (`interviews`, `candidates`, `messages`) in PostgreSQL.
-  - Response: HTTP 200 (OK)
 
 ## 2. `chat.py`
 - `POST /api/v1/interviews/{interview_id}/chat`: Sends candidate answer and gets next AI question.

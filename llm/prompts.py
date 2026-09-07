@@ -229,6 +229,89 @@ Output valid JSON ONLY matching:
   ]
 }}"""
 
+
+def build_rag_screening_prompt(
+    job_title: str,
+    job_description: str,
+    experience_level: str,
+    candidates_with_chunks: List[Dict[str, Any]],
+) -> str:
+    """
+    RAG Prompt for multi-candidate screening.
+    Injects candidate employment timeline and top semantically retrieved CV chunks,
+    instructing the LLM to strictly factor in tenure duration (e.g. 1 year vs 1 month)
+    when scoring and identifying strengths and gaps.
+    """
+    rubric = SENIORITY_RUBRICS.get(experience_level.lower(), SENIORITY_RUBRICS["mid"])
+    cand_blocks = []
+    for idx, c in enumerate(candidates_with_chunks, 1):
+        name = c.get("name", f"Candidate {idx}")
+        filename = c.get("cv_filename") or "Uploaded CV"
+        timeline = c.get("timeline_summary", "").strip()
+        chunks = c.get("retrieved_chunks", [])
+        formatted_chunks = "\n".join(f"  [Chunk {i+1}]: {chunk}" for i, chunk in enumerate(chunks)) if chunks else "  [No specific chunks matched]"
+
+        timeline_section = f"{timeline}\n\n" if timeline else ""
+        cand_blocks.append(
+            f"CANDIDATE #{idx}: {name} (File: {filename})\n"
+            f"{timeline_section}"
+            f"Retrieved Semantic Evidence from CV:\n{formatted_chunks}\n"
+        )
+    all_candidates_text = "\n".join(cand_blocks)
+
+    return f"""You are a Senior Technical Hiring Lead screening multiple candidates for the role: {job_title} ({rubric['title']}).
+
+Job Description & Core Requirements:
+{job_description}
+
+Seniority Expectations ({rubric['title']}):
+{rubric['evaluation_standard']}
+
+Candidate Submissions with Detected Employment Timelines & Semantically Retrieved CV Evidence:
+{all_candidates_text}
+
+INSTRUCTIONS:
+1. ROLE & DOMAIN ALIGNMENT (FIRST PRIORITY):
+   - Analyze the target domain and discipline required by {job_title} and the Job Description (e.g., Backend, Frontend, Full Stack, Data Engineering, Mobile, DevOps, Embedded/Firmware, QA Automation, Machine Learning, etc.).
+   - Assess whether each candidate's actual work experience aligns with this target domain:
+     * Candidates with deep, proven experience in the target domain and required stack are eligible for top scores (75-98).
+     * Candidates from the SAME domain or adjacent disciplines with transferable core engineering skills (e.g., a Backend Developer with .NET, Java, Python, Node.js, Go when hiring for Ruby on Rails Backend, or Full Stack with strong backend experience) must be recognized as valuable matches with transferable foundations (score between 40-70), reflecting that core architectural concepts (REST APIs, HTTP protocol, SQL databases, ORMs, design patterns, microservices, Git) directly transfer.
+     * Candidates from secondary software specializations (e.g., Data Engineering, Machine Learning, or pure Frontend applying for Backend) should be calibrated in the range (25-40) with domain gaps noted.
+     * Candidates from completely unrelated or incompatible engineering domains (e.g., Embedded/Automotive hardware, Industrial PLC, Firmware when hiring for Web Services, or vice-versa) must be strictly penalized for cross-domain mismatch (score capped between 10-25) and flagged in "gaps".
+     * Documents with no relevant technical background (non-IT / non-engineering disciplines) must be disqualified (score between 0 and 5).
+     * Blank forms, HR evaluation templates, or non-CV documents must receive a score of 0.
+   - CRITICAL: Do NOT award high scores for isolated buzzwords (e.g. "AWS", "Python", "Git") mentioned in hobby projects, 1-day workshops, or unrelated contexts if the candidate's core domain does not match the role!
+
+2. SENIORITY & TENURE FIT:
+   - Evaluate verified employment years against the expectations for {rubric['title']}:
+     * Under-qualified applicants (e.g. brief internships, students, or < 1 year experience when applying for Mid/Senior roles) must be penalized for insufficient autonomous production tenure (capped at 40-50).
+     * Candidates meeting the target experience range for {rubric['title']} with sustained hands-on tenure in the requested core technologies should receive top marks.
+     * Flag potential overqualification if a senior lead/architect (e.g., 15+ years) applies for a junior or mid-level position.
+
+3. TENURE & EVIDENCE WEIGHTING:
+   - Prioritize verified production duration on the core technologies explicitly requested in the Job Description.
+   - Highlight multi-year sustained experience in requested competencies under "strengths".
+   - Record missing mandatory requirements or superficial exposure (< 3 months) under "gaps".
+
+4. Calculate an honest, unbiased match score between 0 and 100 representing authentic fit for {job_title}.
+5. Identify 2 to 4 genuine technical strengths observed in the CV evidence relative to the Job Description.
+6. Identify 1 to 3 noticeable gaps, missing requirements, or domain divergences relative to the Job Description.
+7. Provide a concise, professional 2-sentence executive summary.
+
+OUTPUT FORMAT:
+Output valid JSON ONLY (no markdown backticks, no extra text) matching this schema:
+{{
+  "screening_results": [
+    {{
+      "name": "<Candidate Name>",
+      "match_score": <number between 0 and 100>,
+      "strengths": ["<Strength 1>", "<Strength 2>"],
+      "gaps": ["<Gap or missing requirement 1>"],
+      "summary": "<2-sentence executive screening summary>"
+    }}
+  ]
+}}"""
+
 def build_intro_prompt(
     job_title: str,
     job_description: str,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Briefcase,
@@ -14,6 +14,9 @@ import {
   Copy,
   Check,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  Database,
   ExternalLink,
   FileText,
   GripVertical,
@@ -44,6 +47,7 @@ import {
   CandidateScreeningResult,
 } from '@/types';
 import { apiScreenCandidates, apiExtractDocuments } from '@/lib/api';
+import { SAMPLE_JOB, SAMPLE_CANDIDATES } from '@/lib/sample-data';
 
 interface CreateInterviewFormProps {
   onCreateSession: (data: CreateInterviewInput) => Promise<InterviewSession>;
@@ -85,6 +89,8 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
   const [splitRatio, setSplitRatio] = useState<number>(50); // 50% left, 50% right
   const [isDraggingSplitter, setIsDraggingSplitter] = useState<boolean>(false);
   const splitContainerRef = React.useRef<HTMLDivElement>(null);
+  // Stable Blob URL cache to preserve PDF previews without premature revocation
+  const blobUrlsRef = useRef<Map<File, string>>(new Map());
 
   const handleMouseDownSplitter = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -121,6 +127,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
   const [isStarting, setIsStarting] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [showVectorEvidence, setShowVectorEvidence] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const { t } = useLanguage();
 
@@ -219,6 +226,22 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
 
   const handleRemoveCandidate = (index: number) => {
     setCandidates((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleClearAllCandidates = () => {
+    blobUrlsRef.current.forEach((url) => {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {
+        // ignore
+      }
+    });
+    blobUrlsRef.current.clear();
+    setCandidates([]);
+    setTopCandidate(null);
+    setScreeningResults([]);
+    setCreatedSession(null);
+    setFormError(null);
   };
 
   const handleUpdateCandidateName = (index: number, name: string) => {
@@ -380,75 +403,15 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
 
   const fillSampleJob = () => {
     setFormError(null);
-    setJobTitle('Backend Developer');
-    setCompanyName('Agile Freaks');
-    setExperienceLevel('mid');
-    setJobDescription(
-      'About the role:\n\n' +
-        'As a backend developer, you will contribute to designing, implementing and operating a system that supports the product requested features.\n\n' +
-        'We work with: Ruby on Rails, Dry-Rb, Sidekiq, Shoryuken, RSpec/minitest, AWS (S3/SQS/RDS/EKS, etc), Redis, Datadog\n\n' +
-        'This is what we need from you:\n' +
-        '- Experience with Ruby on Rails or another backend language and willingness to learn Rails\n' +
-        '- Technical background (e.g., degree in Computer Science or equivalent experience)\n' +
-        '- Understanding of the HTTP protocol\n' +
-        '- Basic Git knowledge\n' +
-        '- Knowledge of design patterns and SOLID principles\n' +
-        '- Experience building APIs with GraphQL\n' +
-        '- Experience with Event Sourcing\n' +
-        '- Experience with Domain-Driven Design (DDD)\n' +
-        '- Experience working in an agile environment\n' +
-        '- Excellent communication skills in written and spoken English\n\n' +
-        'What we offer:\n' +
-        '- Collaboration type: CIM\n' +
-        '- Fully remote option (based on experience level)\n' +
-        '- We hide nothing! Full disclosure on company information\n' +
-        '- Profit Sharing - we share all registered profit between the freaks, based on seniority and level of experience\n' +
-        '- Craft Budget (personal budget to improve your craft, buy anything you need, software, hardware, books, conference tickets and such): $2500/year/person\n' +
-        '- Access to our startup fund ($120,000) to implement your personal project\n' +
-        '- Flexible working hours\n' +
-        '- Holiday Bonus (1 salary/year)\n' +
-        "- Mold your workplace through AFIP (Agile Freaks Improvement Process). Curious about AFIP? It's the best thing to make yourself heard\n\n" +
-        'Salary range:\n' +
-        'Brut: 16735 lei - 23600 lei\n\n' +
-        'Applicants must be permanent residents in Romania or moving here from an EU country!\n\n' +
-        'Locations: Sibiu (Fully Remote)'
-    );
+    setJobTitle(SAMPLE_JOB.title);
+    setCompanyName(SAMPLE_JOB.company);
+    setExperienceLevel(SAMPLE_JOB.seniority);
+    setJobDescription(SAMPLE_JOB.description);
   };
 
   const fillSampleCandidates = () => {
     setFormError(null);
-    setCandidates([
-      {
-        id: 'sample-1',
-        name: 'Alex Morgan',
-        cvFileName: 'Alex_Morgan_Senior_FullStack.pdf',
-        fileSizeFormatted: '1.8 MB (Top Match)',
-        cvRawText:
-          'Alex Morgan - Senior Full Stack Engineer (8 years experience).\n' +
-          'Tech Stack: React 19, TypeScript, Node.js, Python, FastAPI, PostgreSQL, Docker, Kubernetes, Redis, AWS.\n' +
-          'Experience: Led engineering team building high-scale distributed SaaS platforms with real-time SSE & WebSockets. Optimized PostgreSQL queries by 45%. Strong CI/CD & microservices expertise.',
-      },
-      {
-        id: 'sample-2',
-        name: 'Sarah Chen',
-        cvFileName: 'Sarah_Chen_Backend_Dev.pdf',
-        fileSizeFormatted: '1.2 MB (Mid Match)',
-        cvRawText:
-          'Sarah Chen - Backend Software Engineer (4 years experience).\n' +
-          'Tech Stack: Python, Django, FastAPI, PostgreSQL, AWS, Docker, REST APIs.\n' +
-          'Experience: Designed data ingestion pipelines and REST endpoints. Solid database fundamentals. Limited frontend React experience.',
-      },
-      {
-        id: 'sample-3',
-        name: 'David Miller',
-        cvFileName: 'David_Miller_Frontend_CV.pdf',
-        fileSizeFormatted: '950 KB (Junior Match)',
-        cvRawText:
-          'David Miller - Junior Frontend Developer (2 years experience).\n' +
-          'Tech Stack: React, JavaScript, HTML5, CSS3, Tailwind CSS, Vite, Figma.\n' +
-          'Experience: Built landing pages and responsive UI components. Seeking to expand into backend & cloud infrastructure.',
-      },
-    ]);
+    setCandidates(SAMPLE_CANDIDATES);
   };
 
   const activeTopCandidate =
@@ -463,32 +426,71 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
 
   const activeCandidateFile = useMemo(() => {
     if (!activeTopCandidate) return null;
-    const match = candidates.find(
-      (c) =>
-        c.name.toLowerCase() === activeTopCandidate.name.toLowerCase() ||
-        c.cvFileName === activeTopCandidate.cv_filename
-    );
-    return match?.file || null;
+    const topName = activeTopCandidate.name.trim().toLowerCase();
+    const topFile = (activeTopCandidate.cv_filename || '').trim().toLowerCase();
+
+    // 1. Try matching by unique candidate id
+    if (activeTopCandidate.id) {
+      const matchById = candidates.find((c) => c.id && c.id === activeTopCandidate.id);
+      if (matchById?.file) return matchById.file;
+    }
+
+    // 2. Try matching by exact filename (case-insensitive)
+    if (topFile) {
+      const matchByFile = candidates.find((c) => {
+        const cFile = (c.cvFileName || c.file?.name || '').trim().toLowerCase();
+        return cFile === topFile;
+      });
+      if (matchByFile?.file) return matchByFile.file;
+    }
+
+    // 3. Try matching by candidate name (exact case-insensitive)
+    if (topName) {
+      const matchByName = candidates.find((c) => c.name.trim().toLowerCase() === topName);
+      if (matchByName?.file) return matchByName.file;
+    }
+
+    // 4. Try matching by candidate name substring / inclusion
+    if (topName) {
+      const matchBySubName = candidates.find((c) => {
+        const cName = c.name.trim().toLowerCase();
+        return Boolean(cName && (cName.includes(topName) || topName.includes(cName)));
+      });
+      if (matchBySubName?.file) return matchBySubName.file;
+    }
+
+    // 5. Fallback: if there is only 1 candidate with a file, use that
+    const candidatesWithFiles = candidates.filter((c) => Boolean(c.file));
+    if (candidatesWithFiles.length === 1 && candidatesWithFiles[0].file) {
+      return candidatesWithFiles[0].file;
+    }
+
+    return null;
   }, [activeTopCandidate, candidates]);
 
   const activePdfUrl = useMemo(() => {
     if (!activeCandidateFile) return null;
-    if (
+    const isPdf =
       activeCandidateFile.type === 'application/pdf' ||
-      activeCandidateFile.name.toLowerCase().endsWith('.pdf')
-    ) {
-      return URL.createObjectURL(activeCandidateFile);
+      activeCandidateFile.name.toLowerCase().endsWith('.pdf');
+    if (!isPdf) return null;
+
+    let url = blobUrlsRef.current.get(activeCandidateFile);
+    if (!url) {
+      url = URL.createObjectURL(activeCandidateFile);
+      blobUrlsRef.current.set(activeCandidateFile, url);
     }
-    return null;
+    return url;
   }, [activeCandidateFile]);
 
+  // Clean up cached blob URLs on unmount
   useEffect(() => {
+    const urls = blobUrlsRef.current;
     return () => {
-      if (activePdfUrl) {
-        URL.revokeObjectURL(activePdfUrl);
-      }
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      urls.clear();
     };
-  }, [activePdfUrl]);
+  }, []);
 
   return (
     <div className="w-full flex-1 flex flex-col gap-2 sm:gap-2.5 min-h-0">
@@ -750,9 +752,17 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                   <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </div>
                 <div className="min-w-0">
-                  <CardTitle className="text-sm sm:text-base font-bold truncate">
-                    {t.form.step2Title}
-                  </CardTitle>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <CardTitle className="text-sm sm:text-base font-bold truncate">
+                      {t.form.step2Title}
+                    </CardTitle>
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] bg-primary/10 text-primary border-primary/30 font-medium px-1.5 py-0 select-none"
+                    >
+                      pgvector RAG
+                    </Badge>
+                  </div>
                   <CardDescription className="text-[11px] text-muted-foreground mt-0.5">
                     {t.form.step2Subtitle}
                   </CardDescription>
@@ -807,6 +817,7 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                     onAddFiles={handleAddFiles}
                     onRemoveCandidate={handleRemoveCandidate}
                     onUpdateCandidateName={handleUpdateCandidateName}
+                    onClearAllCandidates={handleClearAllCandidates}
                   />
                 </div>
               </div>
@@ -900,23 +911,121 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                       </div>
                     </div>
 
-                    <Badge
-                      variant="outline"
-                      className="bg-emerald-500/15 text-emerald-400 border-emerald-500/40 text-xs sm:text-sm font-bold font-mono px-2.5 py-0.5 shrink-0 select-none"
-                    >
-                      {activeTopCandidate.match_score}% Match
-                    </Badge>
-                  </div>
-
-                  {/* Executive Screening Summary */}
-                  <div>
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">
-                      Executive AI Screening Summary
-                    </span>
-                    <div className="rounded-lg bg-muted/40 p-3.5 border border-border/50 text-xs text-foreground leading-relaxed">
-                      {activeTopCandidate.summary}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {typeof activeTopCandidate.experience_years === 'number' &&
+                        activeTopCandidate.experience_years > 0 && (
+                          <Badge
+                            variant="outline"
+                            className="bg-primary/10 text-primary border-primary/30 text-xs font-semibold px-2 py-0.5 select-none inline-flex items-center gap-1"
+                          >
+                            <Briefcase className="h-3 w-3" />
+                            {activeTopCandidate.experience_years >= 1
+                              ? `${activeTopCandidate.experience_years} yrs exp`
+                              : `${Math.round(activeTopCandidate.experience_years * 12)} mos exp`}
+                          </Badge>
+                        )}
+                      <Badge
+                        variant="outline"
+                        className="bg-emerald-500/15 text-emerald-400 border-emerald-500/40 text-xs sm:text-sm font-bold font-mono px-2.5 py-0.5 shrink-0 select-none"
+                      >
+                        {activeTopCandidate.match_score}% Match
+                      </Badge>
                     </div>
                   </div>
+
+                  {/* Verified Strengths & Identified Gaps */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {/* Strengths */}
+                    <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3 space-y-1.5">
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-400">
+                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                        <span>Core Strengths</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {activeTopCandidate.strengths && activeTopCandidate.strengths.length > 0 ? (
+                          activeTopCandidate.strengths.map((str, sIdx) => (
+                            <Badge
+                              key={sIdx}
+                              variant="outline"
+                              className="text-[10px] bg-emerald-500/10 text-emerald-300 border-emerald-500/30 px-1.5 py-0"
+                            >
+                              {str}
+                            </Badge>
+                          ))
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground">
+                            Competency verified
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Gaps */}
+                    <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 space-y-1.5">
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-400">
+                        <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                        <span>Identified Gaps</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {activeTopCandidate.gaps && activeTopCandidate.gaps.length > 0 ? (
+                          activeTopCandidate.gaps.map((gap, gIdx) => (
+                            <Badge
+                              key={gIdx}
+                              variant="outline"
+                              className="text-[10px] bg-amber-500/10 text-amber-300 border-amber-500/30 px-1.5 py-0"
+                            >
+                              {gap}
+                            </Badge>
+                          ))
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground">
+                            None observed in preview
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* pgvector Semantic Citations Collapsible */}
+                  {activeTopCandidate.matched_chunks &&
+                    activeTopCandidate.matched_chunks.length > 0 && (
+                      <div className="rounded-lg border border-border/80 bg-muted/20 overflow-hidden text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setShowVectorEvidence((prev) => !prev)}
+                          className="w-full flex items-center justify-between p-2.5 px-3 bg-muted/40 hover:bg-muted/60 transition-colors cursor-pointer select-none text-left"
+                        >
+                          <div className="flex items-center gap-1.5 font-medium text-foreground">
+                            <Database className="h-3.5 w-3.5 text-primary" />
+                            <span>
+                              pgvector Semantic Evidence ({activeTopCandidate.matched_chunks.length}{' '}
+                              chunks)
+                            </span>
+                          </div>
+                          {showVectorEvidence ? (
+                            <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+                          ) : (
+                            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                          )}
+                        </button>
+
+                        {showVectorEvidence && (
+                          <div className="p-3 space-y-2 border-t border-border/60 bg-card/50 max-h-48 overflow-y-auto">
+                            {activeTopCandidate.matched_chunks.map((chunk, cIdx) => (
+                              <div
+                                key={cIdx}
+                                className="p-2 rounded border border-border/50 bg-muted/30 text-[11px] text-muted-foreground leading-relaxed font-mono"
+                              >
+                                <span className="text-primary font-semibold block text-[10px] mb-0.5">
+                                  [Evidence Match #{cIdx + 1}]
+                                </span>
+                                "{chunk}"
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                   {/* Top Candidates Leaderboard (All Ranked Candidates) */}
                   {allRankedCandidates.length > 0 && (
@@ -973,6 +1082,17 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                                         Selected
                                       </Badge>
                                     )}
+                                    {typeof cand.experience_years === 'number' &&
+                                      cand.experience_years > 0 && (
+                                        <Badge
+                                          variant="outline"
+                                          className="text-[9px] px-1.5 py-0 h-4 font-mono font-medium text-muted-foreground border-border/80 select-none"
+                                        >
+                                          {cand.experience_years >= 1
+                                            ? `${cand.experience_years}y exp`
+                                            : `${Math.round(cand.experience_years * 12)}m exp`}
+                                        </Badge>
+                                      )}
                                   </div>
                                   <span className="text-[11px] text-muted-foreground transition-colors truncate block select-none">
                                     {cand.strengths?.[0] || 'Applicant profile'}
@@ -1286,39 +1406,41 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
                         `${activeTopCandidate.name} - Candidate Resume`}
                     </h4>
                     <p className="text-[10px] text-muted-foreground truncate">
-                      {activePdfUrl ? 'Live Document & AI Ingestion' : 'Parsed Resume Profile'}
+                      {activePdfUrl
+                        ? activeDocViewTab === 'pdf'
+                          ? 'Live Interactive PDF'
+                          : 'AI Extracted Profile & Ingestion'
+                        : 'Parsed Resume Profile'}
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {/* Toggle between PDF & AI Extracted Text */}
-                  {activePdfUrl && (
-                    <div className="flex items-center rounded-lg border border-border bg-background/80 p-0.5 text-xs font-medium">
-                      <button
-                        type="button"
-                        onClick={() => setActiveDocViewTab('pdf')}
-                        className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer select-none text-xs ${
-                          activeDocViewTab === 'pdf'
-                            ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
-                            : 'text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        PDF View
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setActiveDocViewTab('text')}
-                        className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer select-none text-xs ${
-                          activeDocViewTab === 'text'
-                            ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
-                            : 'text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        AI Extracted Text
-                      </button>
-                    </div>
-                  )}
+                  {/* Permanent Toggle between PDF & AI Extracted Text */}
+                  <div className="flex items-center rounded-lg border border-border bg-background/80 p-0.5 text-xs font-medium">
+                    <button
+                      type="button"
+                      onClick={() => setActiveDocViewTab('pdf')}
+                      className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer select-none text-xs ${
+                        activeDocViewTab === 'pdf'
+                          ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      PDF View
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveDocViewTab('text')}
+                      className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer select-none text-xs ${
+                        activeDocViewTab === 'text'
+                          ? 'bg-primary text-primary-foreground font-semibold shadow-2xs'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      AI Extracted Text
+                    </button>
+                  </div>
 
                   {activePdfUrl && (
                     <a
@@ -1337,12 +1459,40 @@ export const CreateInterviewForm: React.FC<CreateInterviewFormProps> = ({
 
               {/* Document Reader Frame */}
               <div className="flex-1 overflow-hidden bg-zinc-950/20">
-                {activePdfUrl && activeDocViewTab === 'pdf' ? (
-                  <iframe
-                    src={`${activePdfUrl}#navpanes=0&pagemode=none&toolbar=1&view=FitH`}
-                    title={`${activeTopCandidate.name} CV Document`}
-                    className="w-full h-full border-none bg-white dark:bg-zinc-900 rounded-b-xl"
-                  />
+                {activeDocViewTab === 'pdf' ? (
+                  activePdfUrl ? (
+                    <iframe
+                      src={`${activePdfUrl}#navpanes=0&pagemode=none&toolbar=1&view=FitH`}
+                      title={`${activeTopCandidate.name} CV Document`}
+                      className="w-full h-full border-none bg-white dark:bg-zinc-900 rounded-b-xl"
+                    />
+                  ) : (
+                    <div className="p-6 sm:p-8 h-full flex flex-col items-center justify-center text-center space-y-3.5 select-none text-card-foreground">
+                      <div className="h-12 w-12 rounded-xl bg-muted/60 border border-border flex items-center justify-center text-muted-foreground">
+                        <FileText className="h-6 w-6" />
+                      </div>
+                      <div className="space-y-1 max-w-sm">
+                        <h4 className="text-sm font-semibold text-foreground">
+                          {activeTopCandidate.cv_filename || `${activeTopCandidate.name} CV`}
+                        </h4>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          Fișierul PDF original nu este disponibil în memoria sesiunii curente. Poți
+                          vizualiza datele extrase și analizate de AI prin tab-ul &ldquo;AI
+                          Extracted Text&rdquo;.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setActiveDocViewTab('text')}
+                        className="text-xs gap-1.5 cursor-pointer shadow-2xs"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        <span>Comută pe AI Extracted Text</span>
+                      </Button>
+                    </div>
+                  )
                 ) : (
                   <div className="p-5 sm:p-6 h-full overflow-y-auto space-y-5 select-text text-card-foreground">
                     <div className="border-b border-border/60 pb-4 flex items-start justify-between gap-3">

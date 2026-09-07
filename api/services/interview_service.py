@@ -34,6 +34,7 @@ from llm import (
     build_next_question_prompt,
     is_wrapup_or_evaluation_message,
 )
+from llm.agent import interview_graph, InterviewState
 from llm.constants import (
     CONTEXT_TOKEN_THRESHOLD_RATIO,
     RECENT_MESSAGES_WINDOW_COUNT,
@@ -401,7 +402,10 @@ class InterviewService:
                     await db.commit()
                     logger.info("[Interview %s] Updated conversation summary stored in DB (%d chars).", interview.id, len(updated_summary))
                 except Exception as sum_err:
-                    logger.warning("[Interview %s] Progressive summarization failed: %s. Using fallback window.", interview.id, sum_err)
+                    logger.error("[Interview %s] Progressive summarization failed: %s", interview.id, sum_err)
+                    raise RuntimeError(
+                        f"[Interview {interview.id}] Progressive summarization failed: {sum_err}"
+                    ) from sum_err
 
             # Rebuild system prompt with updated summary
             managed_system_prompt = build_system_interviewer_prompt(
@@ -652,8 +656,9 @@ class InterviewService:
 
         # Add relational Candidate entries
         for res in screening_results:
+            cand_id = res.get("id") or str(uuid.uuid4())[:8]
             cand_model = Candidate(
-                id=str(uuid.uuid4())[:8],
+                id=cand_id,
                 interview_id=interview_id,
                 name=res["name"],
                 cv_filename=res.get("cv_filename"),
@@ -863,201 +868,69 @@ class InterviewService:
         topics = interview.topics_plan or [f"Core {interview.job_title} Engineering"]
         active_status = interview.active_question_status or "WAITING_ANSWER"
         consecutive_clarifications = interview.consecutive_clarifications or 0
-        intent = self._classify_user_intent(candidate_content, active_status, consecutive_clarifications)
-        display_candidate_name = _clean_candidate_display_name(interview.candidate_name)
+        
+        # Prepare state for LangGraph workflow execution
+        current_state: InterviewState = {
+            "interview_id": interview.id,
+            "job_title": interview.job_title,
+            "company_name": interview.company_name,
+            "job_description": interview.job_description,
+            "experience_level": exp_level_str,
+            "candidate_name": interview.candidate_name,
+            "language": interview.language,
+            "conversation_summary": interview.conversation_summary,
+            "topics_plan": topics,
+            "current_topic_index": interview.current_topic_index or 0,
+            "assessed_topics": list(interview.assessed_topics or []),
+            "topic_follow_up_count": interview.topic_follow_up_count or 0,
+            "active_question_number": interview.active_question_number or 1,
+            "active_question_text": interview.active_question_text,
+            "active_question_status": active_status,
+            "consecutive_clarifications": consecutive_clarifications,
+            "time_limit_minutes": time_limit,
+            "remaining_minutes": remaining_min,
+            "time_expired": time_expired,
+            "candidate_message": candidate_content,
+            "previous_questions": [
+                m.content
+                for m in db_messages
+                if m.role == MessageRole.ASSISTANT
+                and m.content
+                and not m.content.startswith("{")
+                and "[INTERVIEW_COMPLETE]" not in m.content
+            ],
+        }
 
-        # Collect past questions asked by AI to enforce strict anti-repetition
-        previous_questions = [
-            m.content
-            for m in db_messages
-            if m.role == MessageRole.ASSISTANT
-            and m.content
-            and not m.content.startswith("{")
-            and "[INTERVIEW_COMPLETE]" not in m.content
-        ]
+        # Invoke LangGraph StateGraph agent for this turn
+        graph_output = interview_graph.invoke(current_state)
+
+        intent = graph_output.get("intent", "ANSWER")
+        is_complete = graph_output.get("is_complete", False)
+        turn_prompt = graph_output.get("turn_prompt", "")
+        assigned_q_num = graph_output.get("assigned_q_num") or interview.active_question_number
 
         state_updates: Dict[str, Any] = {}
-        assigned_q_num: Optional[int] = None
-        turn_prompt = ""
-        is_complete = False
-
-        if intent.startswith("LANGUAGE_REQUEST:"):
-            new_lang = intent.split(":")[1]
-            interview.language = new_lang
-            state_updates["language"] = new_lang
-            active_q = interview.active_question_text or "the current technical question"
-            if new_lang == "ro":
-                turn_prompt = (
-                    f"Candidatul a cerut să continuați interviul în limba ROMÂNĂ ('{candidate_content}').\n"
-                    f"INSTRUCTIUNI:\n"
-                    f"1. Răspunde scurt și colegial în 1 propoziție scurtă în limba română la persoana a II-a singular (ex: 'Sigur, continuăm în limba română!').\n"
-                    f"2. Formulează întrebarea tehnică activă în limba română la persoana a II-a singular: \"{active_q}\".\n"
-                    f"3. REGULĂ DE LIMBĂ: Output 100% în ROMÂNĂ la persoana a II-a singular. Fără 'dumneavoastră' sau 'vă rugăm'."
-                )
-            else:
-                turn_prompt = (
-                    f"The candidate requested to continue the interview in ENGLISH ('{candidate_content}').\n"
-                    f"INSTRUCTIONS:\n"
-                    f"1. Acknowledge warmly in 1 short sentence in English (e.g. 'Sure, let\\'s continue in English!').\n"
-                    f"2. Translate and ask the active technical question in ENGLISH: \"{active_q}\".\n"
-                    f"3. LANGUAGE RULE: Output 100% in ENGLISH. Strictly do NOT output any Romanian words."
-                )
-            assigned_q_num = interview.active_question_number
-
-        elif intent == "CLARIFICATION":
-            state_updates["consecutive_clarifications"] = consecutive_clarifications + 1
-            active_q = interview.active_question_text or "Active technical question"
-            turn_prompt = build_clarification_response_prompt(
-                job_title=interview.job_title,
-                experience_level=exp_level_str,
-                candidate_name=display_candidate_name,
-                active_question_text=active_q,
-                candidate_query=candidate_content,
-                consecutive_clarifications=consecutive_clarifications + 1,
-                clarification_threshold=CLARIFICATION_STEER_THRESHOLD,
-                language=interview.language,
-            )
-            assigned_q_num = interview.active_question_number
-
-        elif intent == "CLARIFICATION_AND_ANSWER":
-            state_updates["consecutive_clarifications"] = 0
-            cur_idx = interview.current_topic_index or 0
-            cur_topic = topics[min(cur_idx, len(topics) - 1)] if topics else "Core Fundamentals"
-            assessed = list(interview.assessed_topics or [])
-            if cur_topic not in assessed:
-                assessed.append(cur_topic)
-            state_updates["assessed_topics"] = assessed
-
-            next_idx = cur_idx + 1
-            state_updates["current_topic_index"] = next_idx
-            next_q_num = (interview.active_question_number or 1) + 1
-            state_updates["active_question_number"] = next_q_num
-            assigned_q_num = next_q_num
+        if "language" in graph_output and graph_output["language"] != interview.language:
+            interview.language = graph_output["language"]
+            state_updates["language"] = graph_output["language"]
+        if "consecutive_clarifications" in graph_output:
+            state_updates["consecutive_clarifications"] = graph_output["consecutive_clarifications"]
+        if "current_topic_index" in graph_output and graph_output["current_topic_index"] != interview.current_topic_index:
+            state_updates["current_topic_index"] = graph_output["current_topic_index"]
+        if "assessed_topics" in graph_output:
+            state_updates["assessed_topics"] = graph_output["assessed_topics"]
+        if "topic_follow_up_count" in graph_output:
+            state_updates["topic_follow_up_count"] = graph_output["topic_follow_up_count"]
+        if "active_question_number" in graph_output and graph_output["active_question_number"] != interview.active_question_number:
+            state_updates["active_question_number"] = graph_output["active_question_number"]
+        if "active_question_status" in graph_output:
+            state_updates["active_question_status"] = graph_output["active_question_status"]
+        if intent in ("ANSWER", "REFUSAL", "CLARIFICATION_AND_ANSWER"):
             state_updates["update_active_question_text_from_ai"] = True
-
-            next_topic = topics[min(next_idx, len(topics) - 1)] if topics else "System Architecture"
-            turn_prompt = build_both_response_prompt(
-                job_title=interview.job_title,
-                experience_level=exp_level_str,
-                candidate_name=display_candidate_name,
-                active_question_text=interview.active_question_text or "Active question",
-                candidate_content=candidate_content,
-                next_topic=next_topic,
-                previous_questions=previous_questions,
-                language=interview.language,
-            )
-
-        elif intent == "REFUSAL_OR_DONT_KNOW":
-            state_updates["consecutive_clarifications"] = 0
-            cur_idx = interview.current_topic_index or 0
-            skipped_topic = topics[min(cur_idx, len(topics) - 1)] if topics else "Previous Topic"
-            assessed = list(interview.assessed_topics or [])
-            if skipped_topic not in assessed:
-                assessed.append(skipped_topic)
-            state_updates["assessed_topics"] = assessed
-
-            next_idx = cur_idx + 1
-            all_assessed = len(assessed) >= len(topics) or next_idx >= len(topics)
-            hit_safety = (interview.active_question_number or 1) >= settings.SAFETY_MAX_QUESTIONS
-            should_conclude = (all_assessed and (interview.active_question_number or 1) >= len(topics)) or time_expired or hit_safety or next_idx >= len(topics)
-
-            if should_conclude:
-                is_complete = True
-                turn_prompt = build_next_question_prompt(
-                    job_title=interview.job_title,
-                    experience_level=exp_level_str,
-                    candidate_name=display_candidate_name,
-                    last_question=interview.active_question_text or "Active question",
-                    candidate_answer=candidate_content,
-                    next_topic="",
-                    is_follow_up=False,
-                    previous_questions=previous_questions,
-                    language=interview.language,
-                    is_final_wrap_up=True,
-                )
-            else:
-                state_updates["current_topic_index"] = next_idx
-                next_q_num = (interview.active_question_number or 1) + 1
-                state_updates["active_question_number"] = next_q_num
-                assigned_q_num = next_q_num
-                state_updates["update_active_question_text_from_ai"] = True
-
-                next_topic = topics[min(next_idx, len(topics) - 1)] if topics else "Next Engineering Competency"
-                turn_prompt = build_refusal_response_prompt(
-                    job_title=interview.job_title,
-                    experience_level=exp_level_str,
-                    candidate_name=display_candidate_name,
-                    skipped_topic=skipped_topic,
-                    next_topic=next_topic,
-                    previous_questions=previous_questions,
-                    language=interview.language,
-                )
-
-        elif intent == "PROFANE_LANGUAGE":
-            active_q = interview.active_question_text or "the current technical question"
-            if interview.language == "ro":
-                turn_prompt = (
-                    f"Candidatul a folosit un limbaj nepotrivit sau vulgar ('{candidate_content[:60]}').\n"
-                    f"1. Răspunde ferm, calm și profesionist în 1 propoziție scurtă la persoana a II-a singular cerând păstrarea unui ton profesional și respectuos.\n"
-                    f"2. Revino direct la întrebarea tehnică activă: \"{active_q}\".\n"
-                    f"3. REGULĂ DE TON: Exclusiv persoana a II-a singular. Fără supărare, dar ferm."
-                )
-            else:
-                turn_prompt = (
-                    f"The candidate used inappropriate language ('{candidate_content[:60]}').\n"
-                    f"1. Calmly and professionally state in 1 brief sentence that we should maintain a respectful and professional conversation.\n"
-                    f"2. Firmly return to the active technical question: \"{active_q}\"."
-                )
-            assigned_q_num = interview.active_question_number
-
-        elif intent == "OFF_TOPIC":
-            active_q = interview.active_question_text or "the current technical requirement"
-            if interview.language == "ro":
-                turn_prompt = f"Candidatul a trimis un mesaj în afara subiectului sau o glumă ('{candidate_content[:60]}'). Refuză politicos în 1 propoziție scurtă și revino ferm la întrebarea activă: \"{active_q}\"."
-            else:
-                turn_prompt = f"The candidate sent an off-topic query or joke ('{candidate_content[:60]}'). Politely decline in 1 brief sentence and firmly return to the active question: \"{active_q}\"."
-            assigned_q_num = interview.active_question_number
-
-        else:  # ANSWER
-            state_updates["consecutive_clarifications"] = 0
-            cur_idx = interview.current_topic_index or 0
-            cur_topic = topics[min(cur_idx, len(topics) - 1)] if topics else "Core Fundamentals"
-            assessed = list(interview.assessed_topics or [])
-            if cur_topic not in assessed:
-                assessed.append(cur_topic)
-            state_updates["assessed_topics"] = assessed
-
-            all_assessed = len(assessed) >= len(topics)
-            hit_safety = (interview.active_question_number or 1) >= settings.SAFETY_MAX_QUESTIONS
-            should_conclude = (all_assessed and (interview.active_question_number or 1) >= len(topics)) or time_expired or hit_safety or (cur_idx + 1 >= len(topics))
-
-            if should_conclude:
-                is_complete = True
-                turn_prompt = ""
-            else:
-                next_idx = cur_idx + 1
-                state_updates["current_topic_index"] = next_idx
-                next_q_num = (interview.active_question_number or 1) + 1
-                state_updates["active_question_number"] = next_q_num
-                assigned_q_num = next_q_num
-                state_updates["update_active_question_text_from_ai"] = True
-
-                next_topic = topics[min(next_idx, len(topics) - 1)] if topics else "Architecture & System Design"
-                turn_prompt = build_next_question_prompt(
-                    job_title=interview.job_title,
-                    experience_level=exp_level_str,
-                    candidate_name=display_candidate_name,
-                    last_question=interview.active_question_text or "Active question",
-                    candidate_answer=candidate_content,
-                    next_topic=next_topic,
-                    is_follow_up=False,
-                    previous_questions=previous_questions,
-                    language=interview.language,
-                    is_final_wrap_up=False,
-                )
 
         # Build managed context payload with messages prior to the current turn prompt
         effective_target_lang = state_updates.get("language", interview.language)
+        display_candidate_name = _clean_candidate_display_name(interview.candidate_name)
         prompt_kwargs = {
             "job_title": interview.job_title,
             "job_description": interview.job_description,
@@ -1150,11 +1023,10 @@ class InterviewService:
                     ai_text = ""
 
             if not ai_text or not ai_text.strip():
-                is_ro = getattr(interview, "language", "en") == "ro"
-                if is_ro:
-                    ai_text = "Îți mulțumesc pentru răspuns. Hai să continuăm — poți detalia puțin mai mult abordarea ta sau un exemplu concret din experiența ta?"
-                else:
-                    ai_text = "Thank you for your answer. Let's continue — could you elaborate a bit more on your approach or provide a concrete example from your experience?"
+                raise RuntimeError(
+                    f"[Interview {interview_id}] AI model returned empty response. "
+                    "Ensure Ollama is running and model is responding."
+                )
 
             ai_signaled_completion = INTERVIEW_COMPLETE_TOKEN in ai_text
             is_complete = is_complete or ai_signaled_completion
@@ -1305,16 +1177,16 @@ class InterviewService:
                             yield {"chunk": display_chunk, "is_complete": False}
                 except Exception as retry_err:
                     logger.error("[Interview %s] Stream error on retry: %s", interview_id, retry_err)
+                    raise RuntimeError(
+                        f"[Interview {interview_id}] Stream error on retry from AI model: {retry_err}"
+                    ) from retry_err
 
-            # Fallback if still empty after retry
+            # Fail fast if still empty after retry
             if not full_ai_response.strip():
-                is_ro = getattr(interview, "language", "en") == "ro"
-                if is_ro:
-                    fallback_msg = "Îți mulțumim pentru răspuns. Hai să continuăm — poți detalia puțin mai mult abordarea ta sau un exemplu concret din experiența ta?"
-                else:
-                    fallback_msg = "Thank you for your answer. Let's continue — could you elaborate a bit more on your approach or provide a concrete example from your experience?"
-                full_ai_response = fallback_msg
-                yield {"chunk": fallback_msg, "is_complete": False}
+                raise RuntimeError(
+                    f"[Interview {interview_id}] AI model returned empty stream response. "
+                    "Ensure Ollama is running and model is responding."
+                )
 
             ai_signaled_completion = INTERVIEW_COMPLETE_TOKEN in full_ai_response
             is_complete = is_complete or ai_signaled_completion
@@ -1515,26 +1387,8 @@ class InterviewService:
                 interview.updated_at = now
                 await db.commit()
 
-            # Generate evaluation report with safety fallback
-            is_ro = getattr(interview, "language", "en") == "ro"
-            try:
-                closing_content = await self._generate_evaluation_closing(interview)
-            except Exception as exc:
-                logger.exception("[Interview %s] Evaluation generation error: %s", interview_id, exc)
-                if is_ro:
-                    closing_content = (
-                        f"Îți mulțumim, {interview.candidate_name}! Sesiunea de interviu pentru poziția de **{interview.job_title}** s-a încheiat.\n\n"
-                        f"**Evaluare Generală AI: 7.0/10** (Hire)\n\n"
-                        f"Candidatul a parcurs interviul tehnic cu succes.\n\n"
-                        f"Transcrierea completă și datele de evaluare au fost înregistrate."
-                    )
-                else:
-                    closing_content = (
-                        f"Thank you, {interview.candidate_name}! The interview session for the **{interview.job_title}** position has concluded.\n\n"
-                        f"**Overall AI Assessment: 7.0/10** (Hire)\n\n"
-                        f"The candidate successfully completed the technical interview.\n\n"
-                        f"Your full transcript and evaluation data have been recorded."
-                    )
+            # Generate evaluation report (fail fast if LLM or evaluation fails)
+            closing_content = await self._generate_evaluation_closing(interview)
 
             # Check if there is an existing wrap-up or evaluation message to replace
             existing_closing_msg = None
@@ -1579,13 +1433,5 @@ class InterviewService:
             await db.commit()
             return await self.get_interview(db, interview.id)
 
-    # ==============================================================================
-    # [DEV ONLY - TEMPORARY TESTING METHOD TO BE REMOVED LATER]
-    # ==============================================================================
-    async def clear_all_data(self, db: AsyncSession) -> None:
-        """Truncate all rows across interviews, candidates, and messages."""
-        from sqlalchemy import text
-        await db.execute(text("TRUNCATE TABLE interviews, candidates, messages CASCADE;"))
-        await db.commit()
 
 interview_service = InterviewService()

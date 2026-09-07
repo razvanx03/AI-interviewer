@@ -42,11 +42,3 @@ export function removeInterviewId(id: string): void {
     console.error('Failed to remove interview ID from localStorage:', err);
   }
 }
-
-export function clearAllStoredInterviewIds(): void {
-  try {
-    localStorage.removeItem(IDS_KEY);
-  } catch (err) {
-    console.error('Failed to clear interview IDs from localStorage:', err);
-  }
-}

@@ -42,11 +42,13 @@ class OllamaProvider(BaseLLMProvider):
         model_name: str,
         temperature: float = DEFAULT_CHAT_TEMPERATURE,
         num_ctx: int = DEFAULT_NUM_CTX,
+        embedding_model: str = "nomic-embed-text",
     ):
         self.base_url = base_url.rstrip("/")
         self.model_name = model_name
         self.temperature = temperature
         self.num_ctx = num_ctx
+        self.embedding_model = embedding_model
         self.timeout = httpx.Timeout(
             connect=HTTP_CONNECT_TIMEOUT_SECONDS,
             read=HTTP_READ_TIMEOUT_SECONDS,
@@ -264,16 +266,9 @@ class OllamaProvider(BaseLLMProvider):
             if parsed_final:
                 return parsed_final
 
-            logger.warning("Failed to parse final aggregated JSON from Ollama [%s]. Generating structured fallback.", raw_final_json[:200])
-            return {
-                "overall_score": 7.0,
-                "recommendation": "hire",
-                "summary": "Technical interview completed. The candidate demonstrated appropriate competence across the evaluated topics.",
-                "strengths": ["Clear technical responses and solid communication."],
-                "weaknesses": ["Further depth on specific architectural tradeoffs recommended."],
-                "rubrics": {},
-                "question_evaluations": [],
-            }
+            raise RuntimeError(
+                f"Failed to parse final aggregated JSON from Ollama output: {raw_final_json[:300]}"
+            )
 
         # Standard single-pass evaluation for standard-length transcripts (<= 4 rounds)
         prompt = build_evaluation_report_prompt(
@@ -299,16 +294,9 @@ class OllamaProvider(BaseLLMProvider):
         if parsed_eval:
             return parsed_eval
 
-        logger.warning("Failed to parse JSON evaluation from Ollama output [%s]. Generating structured fallback.", raw_json[:200])
-        return {
-            "overall_score": 7.0,
-            "recommendation": "hire",
-            "summary": "Technical interview completed. The candidate demonstrated competence on covered topics.",
-            "strengths": ["Clear responses to interview questions."],
-            "weaknesses": ["Explore edge case optimizations in follow-up rounds."],
-            "rubrics": {},
-            "question_evaluations": [],
-        }
+        raise RuntimeError(
+            f"Failed to parse JSON evaluation from Ollama output: {raw_json[:300]}"
+        )
 
     def _parse_json_payload(self, raw_text: str) -> Optional[Dict[str, Any]]:
         """Extract and parse JSON dictionary from LLM response safely."""
@@ -325,7 +313,7 @@ class OllamaProvider(BaseLLMProvider):
         except json.JSONDecodeError:
             pass
 
-        # Regex fallback for JSON object
+        # Regex search for JSON object
         match = re.search(r"(\{[\s\S]*\})", raw_text)
         if match:
             try:
@@ -335,3 +323,76 @@ class OllamaProvider(BaseLLMProvider):
             except json.JSONDecodeError:
                 pass
         return None
+
+    async def embed_text(self, text: str) -> List[float]:
+        """Generate 768-dim vector embedding for single string using Ollama nomic-embed-text."""
+        res = await self.embed_documents([text])
+        if not res:
+            raise RuntimeError(f"Ollama embedding returned empty result for model '{self.embedding_model}'.")
+        return res[0]
+
+    async def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """Generate vector embeddings for list of documents using Ollama /api/embed or /api/embeddings."""
+        if not texts:
+            return []
+
+        clean_texts = [t.strip() or "empty" for t in texts]
+
+        # 1. Try modern batch /api/embed endpoint
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(
+                    f"{self.base_url}/api/embed",
+                    json={
+                        "model": self.embedding_model,
+                        "input": clean_texts,
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    embeddings = data.get("embeddings")
+                    if embeddings and len(embeddings) == len(clean_texts):
+                        return embeddings
+                else:
+                    logger.warning(
+                        "Ollama /api/embed returned HTTP %d (%s). Trying legacy endpoint.",
+                        resp.status_code,
+                        resp.text[:200],
+                    )
+        except Exception as embed_err:
+            logger.warning("Ollama /api/embed attempt failed (%s). Trying legacy endpoint.", embed_err)
+
+        # 2. Try legacy /api/embeddings single-item endpoint
+        results: List[List[float]] = []
+        all_succeeded = True
+        last_error = None
+        for txt in clean_texts:
+            try:
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    resp = await client.post(
+                        f"{self.base_url}/api/embeddings",
+                        json={
+                            "model": self.embedding_model,
+                            "prompt": txt,
+                        },
+                    )
+                    if resp.status_code == 200:
+                        emb = resp.json().get("embedding")
+                        if emb:
+                            results.append(emb)
+                            continue
+                    last_error = f"HTTP {resp.status_code}: {resp.text[:150]}"
+                all_succeeded = False
+                break
+            except Exception as leg_err:
+                last_error = str(leg_err)
+                all_succeeded = False
+                break
+
+        if all_succeeded and len(results) == len(clean_texts):
+            return results
+
+        raise RuntimeError(
+            f"Ollama embedding failed for model '{self.embedding_model}' at {self.base_url}: {last_error}. "
+            f"Ensure Ollama is running and model '{self.embedding_model}' is pulled via 'ollama pull {self.embedding_model}'."
+        )

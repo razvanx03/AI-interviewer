@@ -13,11 +13,11 @@
   - Comprehensive candidate evaluation generation upon completion with strict idempotency (updates existing wrap-up message or returns existing report, preventing duplicate closing messages across multiple finishes or page refreshes).
   - **Deterministic Hardcoded Closing**: The final thank-you message at interview conclusion is generated deterministically without calling the LLM, preventing candidate persona hallucination. The evaluator transcript strictly strips all wrapup messages to avoid penalizing candidates with fictitious unanswered final questions.
 
-## 2. `cv_service.py` & `cv_parser.py`
-- **Class**: `CVService` & `CVParser`
+## 2. `cv_parser.py`
+- **Class**: `CVParser`
 - **Responsibilities**:
-  - File storage in `storage/cvs/` and metadata persistence in `cvs` table.
-  - Document text extraction and structured parsing via LLM / heuristic fallback.
+  - Structured CV data parsing via LLM with strict fail-fast validation (zero mock/heuristic fallbacks).
+  - In-memory document processing for dynamic candidate profiling.
 
 ## 3. `llm/`
 - **Classes**: `BaseLLMProvider`, `OllamaProvider`
