@@ -182,6 +182,7 @@ export const InterviewRoomPage: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [
+    activeSession?.id,
     activeSession?.createdAt,
     activeSession?.timeLimitMinutes,
     activeSession?.status,
