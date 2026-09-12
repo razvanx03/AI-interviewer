@@ -51,6 +51,8 @@ venv.bak/
 .env.*.local
 *.env
 !.env.example
+ngrok.yml
+ngrok.yaml
 
 # Local Storage / Uploads / Model weights & Databases
 storage/
