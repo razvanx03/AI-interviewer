@@ -56,7 +56,8 @@ services:
     ports:
       - "5173:5173"
     environment:
-      - VITE_API_URL=${VITE_API_URL:?VITE_API_URL is required in .env}
+      - VITE_API_URL=${VITE_API_URL:-/api/v1}
+      - BACKEND_PROXY_TARGET=http://api:8000
     volumes:
       - ./app:/app
       - /app/node_modules
